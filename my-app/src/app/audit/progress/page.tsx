@@ -7,9 +7,9 @@ import { Progress } from '@/components/ui/progress';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { runAudit } from '@/services/audit';
+import { runAudit, FullAuditResult } from '@/services/audit';
 import { saveAuditState } from '@/services/storage';
-import { AuditFormData, AuditState, MetricResult } from '@/types';
+import { AuditFormData, AuditState, MetricResult, CategoryScore, DiagnosticItem, CWVAssessment } from '@/types';
 import {
   Loader2,
   CheckCircle2,
@@ -21,7 +21,10 @@ import {
   RefreshCcw,
   AlertTriangle,
   Clock,
-  CheckCircle
+  CheckCircle,
+  Activity,
+  BarChart3,
+  FileSearch
 } from 'lucide-react';
 import Link from 'next/link';
 
@@ -31,6 +34,9 @@ interface PageProgress {
   mobile: 'pending' | 'running' | 'completed' | 'failed';
   desktop: 'pending' | 'running' | 'completed' | 'failed';
   metrics: MetricResult[];
+  categoryScores: CategoryScore[];
+  diagnostics: DiagnosticItem[];
+  cwvAssessment?: CWVAssessment;
 }
 
 export default function AuditProgressPage() {
@@ -40,6 +46,11 @@ export default function AuditProgressPage() {
   const [overallProgress, setOverallProgress] = useState(0);
   const [status, setStatus] = useState<'running' | 'completed' | 'failed'>('running');
   const [error, setError] = useState<string | null>(null);
+  const [stats, setStats] = useState({
+    metricsCollected: 0,
+    categoryScoresCollected: 0,
+    diagnosticsCollected: 0
+  });
 
   useEffect(() => {
     const stored = sessionStorage.getItem('audit-form-data');
@@ -56,7 +67,9 @@ export default function AuditProgressPage() {
       url: page.url,
       mobile: 'pending' as const,
       desktop: 'pending' as const,
-      metrics: []
+      metrics: [],
+      categoryScores: [],
+      diagnostics: []
     }));
     setPageProgress(initialProgress);
 
@@ -68,7 +81,7 @@ export default function AuditProgressPage() {
     initialProgress: PageProgress[]
   ) => {
     try {
-      const { run, pages, metrics } = await runAudit(data, (progress) => {
+      const result: FullAuditResult = await runAudit(data, (progress) => {
         const percent = (progress.completed / progress.total) * 100;
         setOverallProgress(percent);
 
@@ -96,19 +109,34 @@ export default function AuditProgressPage() {
       })));
 
       const state: AuditState = {
-        run,
-        pages,
-        metrics,
+        run: result.run,
+        pages: result.pages,
+        metrics: result.metrics,
+        categoryScores: result.categoryScores,
+        diagnostics: result.diagnostics,
+        cwvAssessments: result.cwvAssessments,
         status: 'completed',
-        progress: { total: pages.length * 2, completed: pages.length * 2 }
+        progress: { total: result.pages.length * 2, completed: result.pages.length * 2 }
       };
 
       saveAuditState(state);
       setStatus('completed');
       setOverallProgress(100);
 
-      sessionStorage.setItem('current-audit-state', JSON.stringify(state));
+      setStats({
+        metricsCollected: result.metrics.length,
+        categoryScoresCollected: result.categoryScores.length,
+        diagnosticsCollected: result.diagnostics.length
+      });
+
+      // Try saving to session storage for the results page transition
+      try {
+        sessionStorage.setItem('current-audit-state', JSON.stringify(state));
+      } catch (sessionError) {
+        console.warn('Session storage failed, results page will fallback to IndexedDB/LocalStorage');
+      }
     } catch (err) {
+      console.error('Audit process failed:', err);
       setStatus('failed');
       setError(err instanceof Error ? err.message : 'Unknown error occurred');
     }
@@ -124,7 +152,9 @@ export default function AuditProgressPage() {
         url: page.url,
         mobile: 'pending' as const,
         desktop: 'pending' as const,
-        metrics: []
+        metrics: [],
+        categoryScores: [],
+        diagnostics: []
       }));
       setPageProgress(initialProgress);
       runAuditProcess(formData, initialProgress);
@@ -157,6 +187,40 @@ export default function AuditProgressPage() {
         </div>
 
         <Progress value={overallProgress} className="h-4 bg-slate-200 mb-8 rounded-full [&>div]:bg-slate-900" />
+
+        {/* Data Collection Stats */}
+        {status === 'completed' && (
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+            <Card className="bg-blue-50 border-blue-200">
+              <CardContent className="p-4 flex items-center gap-3">
+                <Activity className="h-5 w-5 text-blue-600" />
+                <div>
+                  <p className="text-xs text-blue-600 font-medium uppercase">Metrics Collected</p>
+                  <p className="text-xl font-bold text-blue-900">{stats.metricsCollected}</p>
+                </div>
+              </CardContent>
+            </Card>
+            <Card className="bg-emerald-50 border-emerald-200">
+              <CardContent className="p-4 flex items-center gap-3">
+                <BarChart3 className="h-5 w-5 text-emerald-600" />
+                <div>
+                  <p className="text-xs text-emerald-600 font-medium uppercase">Category Scores</p>
+                  <p className="text-xl font-bold text-emerald-900">{stats.categoryScoresCollected}</p>
+                </div>
+              </CardContent>
+            </Card>
+            <Card className="bg-amber-50 border-amber-200">
+              <CardContent className="p-4 flex items-center gap-3">
+                <FileSearch className="h-5 w-5 text-amber-600" />
+                <div>
+                  <p className="text-xs text-amber-600 font-medium uppercase">Diagnostic Items</p>
+                  <p className="text-xl font-bold text-amber-900">{stats.diagnosticsCollected}</p>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        )}
+
         <Card className="mb-8 rounded-xl shadow-sm border-slate-200 overflow-hidden">
           <div className="p-6 bg-white border-b border-slate-100 flex justify-between items-start">
             <div className="flex gap-4 items-center">
@@ -165,11 +229,17 @@ export default function AuditProgressPage() {
               </div>
               <div>
                 <h3 className="text-lg font-bold text-slate-900">Audit Pipeline Status</h3>
-                <p className="text-sm text-slate-500 mt-0.5">Real-time updates from internal test environments</p>
+                <p className="text-sm text-slate-500 mt-0.5">
+                  {status === 'running'
+                    ? 'Collecting PageSpeed Insights data with full diagnostics...'
+                    : status === 'completed'
+                      ? 'Audit complete with category scores and diagnostic details'
+                      : 'Audit failed - see error details below'}
+                </p>
               </div>
             </div>
             <div className="bg-slate-100 text-slate-600 px-3 py-1 rounded-md text-xs font-mono font-medium border border-slate-200">
-              Session ID: PP-{Math.floor(Math.random() * 900) + 100}-XJ
+              Run ID: {Math.random().toString(36).substring(2, 10).toUpperCase()}
             </div>
           </div>
           <CardContent className="p-0 bg-white">
@@ -239,11 +309,12 @@ export default function AuditProgressPage() {
             </div>
             <div className="bg-slate-50 border-t border-slate-100 p-4 flex justify-between items-center text-xs font-medium text-slate-500">
               <div className="flex items-center gap-6">
-                <span className="flex items-center gap-2"><span className="w-2 h-2 rounded-full bg-blue-500"></span> PSI Engine Active</span>
+                <span className="flex items-center gap-2"><span className="w-2 h-2 rounded-full bg-blue-500"></span> PageSpeed Insights API</span>
+                <span className="flex items-center gap-2"><span className="w-2 h-2 rounded-full bg-emerald-500"></span> Category Scores</span>
                 <span className="flex items-center gap-2"><span className="w-2 h-2 rounded-full bg-amber-500"></span> Lighthouse Fallback Enabled</span>
               </div>
               <div>
-                {status === 'running' ? 'Estimated remaining time: ~45s' : 'Audit Complete'}
+                {status === 'running' ? 'Collecting full diagnostic data...' : status === 'completed' ? 'Audit Complete' : 'Audit Failed'}
               </div>
             </div>
           </CardContent>
@@ -280,7 +351,7 @@ export default function AuditProgressPage() {
               </div>
               <div>
                 <h4 className="text-sm font-bold text-slate-900">Audit Protocol</h4>
-                <p className="text-xs text-slate-500 mt-0.5">W3C Performance API • PSI v10.2</p>
+                <p className="text-xs text-slate-500 mt-0.5">Core Web Vitals • PSI v5</p>
               </div>
             </CardContent>
           </Card>
@@ -291,7 +362,7 @@ export default function AuditProgressPage() {
           <div className="max-w-6xl mx-auto flex items-center justify-end gap-6">
             {status === 'running' ? (
               <>
-                <span className="text-sm italic text-slate-400 tracking-wide">Finalizing diagnostics... please do not close this window.</span>
+                <span className="text-sm italic text-slate-400 tracking-wide">Collecting diagnostics... please do not close this window.</span>
                 <Button disabled className="bg-slate-100 text-slate-500 border border-slate-200 h-12 px-8 rounded-md font-semibold">
                   Awaiting Completion...
                 </Button>

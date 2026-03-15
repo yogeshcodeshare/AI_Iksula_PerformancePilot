@@ -1,0 +1,16 @@
+⚠ Warning: Next.js inferred your workspace root, but it may not be correct.
+ We detected multiple lockfiles and selected the directory of /Users/yogeshmohite/package-lock.json as the root directory.
+ To silence this warning, set `turbopack.root` in your Next.js config, or consider removing one of the lockfiles if it's not needed.
+   See https://nextjs.org/docs/app/api-reference/config/next-config-js/turbopack#root-directory for more information.
+ Detected additional lockfiles: 
+   * /Users/yogeshmohite/AI_Tester_Project/Project8-AI_Performance_Audit_Agent/my-app/package-lock.json
+
+▲ Next.js 16.1.6 (Turbopack)
+- Local:         http://localhost:3000
+- Network:       http://192.168.1.33:3000
+- Environments: .env.local
+
+✓ Starting...
+⨯ Unable to acquire lock at /Users/yogeshmohite/AI_Tester_Project/Project8-AI_Performance_Audit_Agent/my-app/dist/dev/lock, is another instance of next dev running?
+  Suggestion: If you intended to restart next dev, terminate the other process, and then try again.
+[?25h

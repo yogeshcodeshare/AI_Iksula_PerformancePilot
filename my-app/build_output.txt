@@ -1,0 +1,68 @@
+⚠ Warning: Next.js inferred your workspace root, but it may not be correct.
+ We detected multiple lockfiles and selected the directory of /Users/yogeshmohite/package-lock.json as the root directory.
+ To silence this warning, set `turbopack.root` in your Next.js config, or consider removing one of the lockfiles if it's not needed.
+   See https://nextjs.org/docs/app/api-reference/config/next-config-js/turbopack#root-directory for more information.
+ Detected additional lockfiles: 
+   * /Users/yogeshmohite/AI_Tester_Project/Project8-AI_Performance_Audit_Agent/my-app/package-lock.json
+
+▲ Next.js 16.1.6 (Turbopack)
+- Environments: .env.local
+
+  Creating an optimized production build ...
+✓ Compiled successfully in 7.9s
+  Running TypeScript ...
+  Collecting page data using 7 workers ...
+  Generating static pages using 7 workers (0/8) ...
+Error [ChunkLoadError]: Failed to load chunk server/chunks/ssr/AI_Tester_Project_Project8-AI_Performance_Audit_Agent_my-app_cf494779._.js from module 3184
+    at Context.loadChunkAsync [as l] (.next/server/chunks/ssr/[turbopack]_runtime.js:683:27) {
+  digest: '3794810136',
+  [cause]: Error: Cannot find module '/Users/yogeshmohite/AI_Tester_Project/Project8-AI_Performance_Audit_Agent/my-app/.next/server/chunks/ssr/AI_Tester_Project_Project8-AI_Performance_Audit_Agent_my-app_cf494779._.js'
+  Require stack:
+  - /Users/yogeshmohite/AI_Tester_Project/Project8-AI_Performance_Audit_Agent/my-app/.next/server/chunks/ssr/[turbopack]_runtime.js
+  - /Users/yogeshmohite/AI_Tester_Project/Project8-AI_Performance_Audit_Agent/my-app/.next/server/app/audit/progress/page.js
+  - /Users/yogeshmohite/AI_Tester_Project/Project8-AI_Performance_Audit_Agent/my-app/node_modules/next/dist/server/require.js
+  - /Users/yogeshmohite/AI_Tester_Project/Project8-AI_Performance_Audit_Agent/my-app/node_modules/next/dist/server/load-components.js
+  - /Users/yogeshmohite/AI_Tester_Project/Project8-AI_Performance_Audit_Agent/my-app/node_modules/next/dist/build/utils.js
+  - /Users/yogeshmohite/AI_Tester_Project/Project8-AI_Performance_Audit_Agent/my-app/node_modules/next/dist/build/worker.js
+  - /Users/yogeshmohite/AI_Tester_Project/Project8-AI_Performance_Audit_Agent/my-app/node_modules/next/dist/compiled/jest-worker/processChild.js
+      at ignore-listed frames {
+    code: 'MODULE_NOT_FOUND',
+    requireStack: [
+      '/Users/yogeshmohite/AI_Tester_Project/Project8-AI_Performance_Audit_Agent/my-app/.next/server/chunks/ssr/[turbopack]_runtime.js',
+      '/Users/yogeshmohite/AI_Tester_Project/Project8-AI_Performance_Audit_Agent/my-app/.next/server/app/audit/progress/page.js',
+      '/Users/yogeshmohite/AI_Tester_Project/Project8-AI_Performance_Audit_Agent/my-app/node_modules/next/dist/server/require.js',
+      '/Users/yogeshmohite/AI_Tester_Project/Project8-AI_Performance_Audit_Agent/my-app/node_modules/next/dist/server/load-components.js',
+      '/Users/yogeshmohite/AI_Tester_Project/Project8-AI_Performance_Audit_Agent/my-app/node_modules/next/dist/build/utils.js',
+      '/Users/yogeshmohite/AI_Tester_Project/Project8-AI_Performance_Audit_Agent/my-app/node_modules/next/dist/build/worker.js',
+      '/Users/yogeshmohite/AI_Tester_Project/Project8-AI_Performance_Audit_Agent/my-app/node_modules/next/dist/compiled/jest-worker/processChild.js'
+    ]
+  }
+}
+Error occurred prerendering page "/settings". Read more: https://nextjs.org/docs/messages/prerender-error
+Error [ChunkLoadError]: Failed to load chunk server/chunks/ssr/AI_Tester_Project_Project8-AI_Performance_Audit_Agent_my-app_cf494779._.js from module 3184
+    at Context.loadChunkAsync [as l] (.next/server/chunks/ssr/[turbopack]_runtime.js:683:27) {
+  digest: '3794810136',
+  [cause]: Error: Cannot find module '/Users/yogeshmohite/AI_Tester_Project/Project8-AI_Performance_Audit_Agent/my-app/.next/server/chunks/ssr/AI_Tester_Project_Project8-AI_Performance_Audit_Agent_my-app_cf494779._.js'
+  Require stack:
+  - /Users/yogeshmohite/AI_Tester_Project/Project8-AI_Performance_Audit_Agent/my-app/.next/server/chunks/ssr/[turbopack]_runtime.js
+  - /Users/yogeshmohite/AI_Tester_Project/Project8-AI_Performance_Audit_Agent/my-app/.next/server/app/audit/progress/page.js
+  - /Users/yogeshmohite/AI_Tester_Project/Project8-AI_Performance_Audit_Agent/my-app/node_modules/next/dist/server/require.js
+  - /Users/yogeshmohite/AI_Tester_Project/Project8-AI_Performance_Audit_Agent/my-app/node_modules/next/dist/server/load-components.js
+  - /Users/yogeshmohite/AI_Tester_Project/Project8-AI_Performance_Audit_Agent/my-app/node_modules/next/dist/build/utils.js
+  - /Users/yogeshmohite/AI_Tester_Project/Project8-AI_Performance_Audit_Agent/my-app/node_modules/next/dist/build/worker.js
+  - /Users/yogeshmohite/AI_Tester_Project/Project8-AI_Performance_Audit_Agent/my-app/node_modules/next/dist/compiled/jest-worker/processChild.js
+      at ignore-listed frames {
+    code: 'MODULE_NOT_FOUND',
+    requireStack: [
+      '/Users/yogeshmohite/AI_Tester_Project/Project8-AI_Performance_Audit_Agent/my-app/.next/server/chunks/ssr/[turbopack]_runtime.js',
+      '/Users/yogeshmohite/AI_Tester_Project/Project8-AI_Performance_Audit_Agent/my-app/.next/server/app/audit/progress/page.js',
+      '/Users/yogeshmohite/AI_Tester_Project/Project8-AI_Performance_Audit_Agent/my-app/node_modules/next/dist/server/require.js',
+      '/Users/yogeshmohite/AI_Tester_Project/Project8-AI_Performance_Audit_Agent/my-app/node_modules/next/dist/server/load-components.js',
+      '/Users/yogeshmohite/AI_Tester_Project/Project8-AI_Performance_Audit_Agent/my-app/node_modules/next/dist/build/utils.js',
+      '/Users/yogeshmohite/AI_Tester_Project/Project8-AI_Performance_Audit_Agent/my-app/node_modules/next/dist/build/worker.js',
+      '/Users/yogeshmohite/AI_Tester_Project/Project8-AI_Performance_Audit_Agent/my-app/node_modules/next/dist/compiled/jest-worker/processChild.js'
+    ]
+  }
+}
+Export encountered an error on /settings/page: /settings, exiting the build.
+⨯ Next.js build worker exited with code: 1 and signal: null

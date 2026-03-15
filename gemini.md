@@ -116,6 +116,7 @@ interface ReportPackage {
 4. **No Database Rule**: Use portable report packages instead of Postgres
 5. **Standardized Report Rule**: One audit = one standardized website report (all pages combined)
 6. **Anti-Hallucination Rule**: Only use data from actual API responses
+7. **Baseline-Before-Change Rule**: For any update to the existing website, first capture current state (inventory, UI, performance, etc.). Every update must compare before vs after wherever possible.
 
 ## Architecture Invariants
 
@@ -129,21 +130,25 @@ interface ReportPackage {
 ## Source Policy
 
 ```
-Attempt Order:
-1. Google PageSpeed Insights API (mobile, category=PERFORMANCE)
-2. Google PageSpeed Insights API (desktop, category=PERFORMANCE)
-3. Lighthouse CLI (mobile fallback)
-4. Lighthouse CLI (desktop fallback)
-
-Failure Conditions for PageSpeed:
-- Request error
-- Timeout (>30s)
-- Invalid payload
-- Quota/rate-limit failure
-- Missing required metrics
-- Empty report
 - Device-specific failure
 ```
+
+## B.L.A.S.T. Principles
+
+The project follows the **B.L.A.S.T.** protocol:
+- **Blueprint**: Define goals, personas, and success criteria in `task_plan.md`.
+- **Link**: Verify all API and environment dependencies before implementation.
+- **Architect**: Separate reasoning (SOPs) from orchestration (UI) and deterministic tools.
+- **Stylize**: Maintain high UX/UI quality with structured output and accessibility.
+- **Trigger**: Validate, benchmark, and monitor all releases with a post-release review.
+
+## Mandatory Validation Gates
+
+Before any feature is considered "Done", it must pass:
+1. **Product Gates**: Requirements mapped to implementation, acceptance criteria covered.
+2. **Engineering Gates**: Type safety, deterministic behavior, error handling.
+3. **Quality Gates**: Responsive checks, accessibility (WCAG), SEO, Performance (PSI).
+4. **Evidence Gates**: Screenshots, logs, or benchmark comparisons (Before vs After).
 
 ## UI/UX Guidelines
 
@@ -160,9 +165,11 @@ Failure Conditions for PageSpeed:
 ```
 /
 ├── gemini.md              # This file - Project Constitution
-├── task_plan.md           # Phases and goals
-├── findings.md            # Research discoveries
-├── progress.md            # What was done
+├── task_plan.md           # Scope, phases, and checklist
+├── findings.md            # Research notes and edge cases
+├── progress.md            # Work log and test outcomes
+├── decisions.md           # Architecture and product decisions with rationale
+├── change_log.md          # Technical and user-visible changes across updates
 ├── architecture/          # Layer 1: SOPs
 │   ├── threshold-sop.md
 │   ├── fallback-sop.md

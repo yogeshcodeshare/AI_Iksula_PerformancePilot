@@ -13,7 +13,8 @@ This project automates the manual, spreadsheet-driven workflow that QA teams use
 - Generates standardized PDF reports + JSON data packages
 - Supports comparison between audit runs via file upload
 
-**Key Design Decisions:**
+### Key Design Decisions
+
 - **No Database**: Uses portable report packages (JSON + PDF + metadata ZIP) instead of Postgres
 - **PageSpeed First**: Primary data source with automatic origin-level and Lighthouse fallback
 - **Transparency**: All sources and fallbacks clearly labeled in UI and exports
@@ -23,23 +24,25 @@ This project automates the manual, spreadsheet-driven workflow that QA teams use
 
 | Layer | Technology |
 |-------|------------|
-| Framework | Next.js 16 + React 19 |
+| Framework | Next.js 16.1.6 + React 19.2.3 |
 | Language | TypeScript 5 (strict mode) |
 | Styling | Tailwind CSS 4 |
-| UI Components | shadcn/ui |
-| Charts | Recharts |
-| PDF Generation | jsPDF |
-| ZIP Export | JSZip |
-| Icons | Lucide React |
+| UI Components | shadcn/ui (New York style) |
+| Charts | Recharts 3.7.0 |
+| PDF Generation | jsPDF 4.2.0 |
+| ZIP Export | JSZip 3.10.1 |
+| Icons | Lucide React 0.577.0 |
 
 ## Project Structure
 
 ```
 /
 ├── gemini.md                    # Project constitution (data schemas, behavioral rules)
-├── task_plan.md                 # Implementation phases and progress
-├── findings.md                  # Research notes and discoveries
+├── task_plan.md                 # Scope, phases, and checklist
+├── findings.md                  # Research notes and edge cases
 ├── progress.md                  # Build progress log
+├── decisions.md                 # Architecture and product decisions with rationale
+├── change_log.md                # Technical and user-visible changes across updates
 ├── PROJECT_SUMMARY.md           # Project summary and overview
 ├── AGENTS.md                    # This file - Agent guidelines
 ├── architecture/                # Layer 1: SOP documentation
@@ -51,13 +54,16 @@ This project automates the manual, spreadsheet-driven workflow that QA teams use
 │   ├── src/
 │   │   ├── app/                 # Next.js app router pages
 │   │   │   ├── page.tsx         # Dashboard (entry point)
+│   │   │   ├── layout.tsx       # Root layout with providers
 │   │   │   ├── audit/           # New audit flow (setup + progress)
 │   │   │   ├── results/         # Results display
 │   │   │   ├── compare/         # Comparison mode
 │   │   │   └── settings/        # Configuration
-│   │   ├── components/ui/       # shadcn/ui components
+│   │   ├── components/
+│   │   │   ├── ui/              # shadcn/ui components
+│   │   │   └── layout/          # Layout components (Navbar)
 │   │   ├── lib/                 # Utilities and constants
-│   │   │   ├── utils.ts         # Helper functions (formatMetricValue, classifyMetric)
+│   │   │   ├── utils.ts         # Helper functions
 │   │   │   └── constants.ts     # Thresholds and config
 │   │   ├── services/            # Business logic
 │   │   │   ├── audit.ts         # PageSpeed/Lighthouse integration
@@ -69,9 +75,13 @@ This project automates the manual, spreadsheet-driven workflow that QA teams use
 │   ├── public/                  # Static assets
 │   ├── next.config.ts           # Next.js configuration
 │   ├── tsconfig.json            # TypeScript configuration
+│   ├── components.json          # shadcn/ui configuration
 │   └── package.json             # Dependencies
 └── Document/                    # Reference documents
-    └── AI_Performance_Audit_Agent_PRD_v2.md
+    ├── AI_Performance_Audit_Agent_PRD_v2.md
+    ├── AI_Performance_Audit_Agent_Result_Page_Enhancement_Spec.md
+    ├── B.L.A.S.T.md
+    └── Anti_Hallucination_Master_Web_AI_Project_v2.md
 ```
 
 ## Build and Development Commands
@@ -106,15 +116,8 @@ NEXT_PUBLIC_PAGESPEED_API_KEY=your_google_api_key_here
 
 An API key is already configured in the current `.env.local` file.
 
-## Key Files Reference
+## Data Schemas (Canonical)
 
-### Configuration
-- `next.config.ts` - Static export config (`output: 'export'`, `distDir: 'dist'`)
-- `tsconfig.json` - TypeScript with strict mode, path alias `@/*` → `./src/*`
-- `components.json` - shadcn/ui configuration
-- `.env.local` - API key and environment variables
-
-### Data Schemas (Canonical)
 All data schemas are defined in `gemini.md` and mirrored in `src/types/index.ts`:
 
 ```typescript
@@ -155,7 +158,7 @@ interface MetricResult {
 }
 ```
 
-### Core Web Vitals Thresholds
+## Core Web Vitals Thresholds
 
 | Metric | Good | Needs Improvement | Poor | Unit |
 |--------|------|-------------------|------|------|
@@ -166,6 +169,23 @@ interface MetricResult {
 | TTFB | ≤0.8s | ≤1.8s | >1.8s | ms |
 
 Thresholds are defined in `src/lib/constants.ts`.
+
+## B.L.A.S.T. Principles
+
+This project follows the **B.L.A.S.T. Protocol** for all development:
+- **Blueprint**: Define requirements and success metrics in `task_plan.md` first.
+- **Link**: Test connections to Google APIs and local storage before logic build.
+- **Architect**: Separate reasoning (SOPs) from UI (Next.js) and Tools (Services).
+- **Stylize**: Polish the UI using shadcn/ui and ensure WCAG accessibility.
+- **Trigger**: Capture benchmarks (before/after) and validate all changes.
+
+## Mandatory Validation Gates
+
+A task is not considered "Done" until it passes these gates:
+1. **Product**: Mapped to requirements in PRD.
+2. **Engineering**: Type safe, error-handled, deterministic.
+3. **Quality**: Responsive (Mobile/Desktop), Performance-checked.
+4. **Evidence**: Validation logs or before/after screenshots provided.
 
 ## Code Organization Principles
 
@@ -206,6 +226,7 @@ Thresholds are defined in `src/lib/constants.ts`.
 **IMPORTANT**: PageSpeed API returns CLS as a normal floating point (e.g., `0.68`). 
 - **Do NOT divide by 100** - this was a previous bug
 - Use the value directly from `data.loadingExperience.metrics.CUMULATIVE_LAYOUT_SHIFT_SCORE.percentile`
+- Handle both raw values (>1, divide by 100) and direct floats (≤1, use as-is)
 
 ### 2. Data Source Priority
 The audit service tries data sources in this order:
@@ -219,6 +240,7 @@ const apiUrl = `https://www.googleapis.com/pagespeedonline/v5/runPagespeed?url=$
 ```
 - `category=PERFORMANCE` is **required** to get full Lighthouse performance audits
 - Without this parameter, LCP, CLS, FCP, TTFB will not be available
+- Multiple categories can be requested: `&category=PERFORMANCE&category=ACCESSIBILITY&category=BEST_PRACTICES&category=SEO`
 
 ### 4. Metric Display Format
 Values > 1000ms are converted to seconds with 1 decimal place:
@@ -315,9 +337,17 @@ For a client-side only app, localStorage provides persistence without backend co
 ### Why Origin-Level Fallback?
 When a specific URL doesn't have enough CrUX data, the origin-level data (entire domain) provides a reasonable fallback while still being real user data.
 
+## Self-Repair Loop
+
+When a technical failure occurs:
+1. Inspect the terminal error or console log.
+2. Identify the root cause.
+3. Patch the smallest correct layer (SOP, Orchestration, or Tool).
+4. Retest and document the fix in `progress.md`.
+
 ## Anti-Hallucination Rules
 
-Per `Document/ch_01_anti_hallucination (2).md`:
+Per `Document/Anti_Hallucination_Master_Web_AI_Project_v2.md`:
 - Only use data from actual API responses
 - All thresholds explicitly defined in code
 - Fallback reasons must be stored and displayed
@@ -328,6 +358,7 @@ Per `Document/ch_01_anti_hallucination (2).md`:
 ## Resources
 
 - **PRD**: `Document/AI_Performance_Audit_Agent_PRD_v2.md`
+- **Result Page Enhancement Spec**: `Document/AI_Performance_Audit_Agent_Result_Page_Enhancement_Spec.md`
 - **Project Constitution**: `gemini.md`
 - **B.L.A.S.T. Protocol**: `Document/B.L.A.S.T.md`
 - **PageSpeed API Docs**: https://developers.google.com/speed/docs/insights/v5/get-started

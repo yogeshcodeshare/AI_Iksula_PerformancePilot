@@ -6,14 +6,14 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { AuditState } from '@/types';
+import { RecentAudit } from '@/services/storage';
 import { getRecentAudits, importReportPackage } from '@/services/storage';
 import { formatDate, calculateOverallHealth } from '@/lib/utils';
 import { FileText, Plus, Upload, Activity, TrendingUp, AlertCircle, ArrowRight } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 
 export default function Dashboard() {
-  const [recentAudits, setRecentAudits] = useState<AuditState[]>([]);
+  const [recentAudits, setRecentAudits] = useState<RecentAudit[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const router = useRouter();
 
@@ -46,10 +46,9 @@ export default function Dashboard() {
   const getQuickStats = () => {
     if (recentAudits.length === 0) return null;
 
-    const completed = recentAudits.filter(a => a.status === 'completed').length;
-    const totalPages = recentAudits.reduce((sum, a) => sum + a.pages.length, 0);
+    const totalPages = recentAudits.reduce((sum, a) => sum + (a.pageCount || 0), 0);
 
-    return { completed, totalPages, totalAudits: recentAudits.length };
+    return { totalPages, totalAudits: recentAudits.length };
   };
 
   const stats = getQuickStats();
@@ -109,13 +108,13 @@ export default function Dashboard() {
               <CardContent className="pt-6">
                 <div className="flex items-center justify-between">
                   <div>
-                    <p className="text-xs font-semibold tracking-wider text-slate-500 uppercase mb-2">Success Rate</p>
+                    <p className="text-xs font-semibold tracking-wider text-slate-500 uppercase mb-2">Avg Health</p>
                     <p className="text-4xl font-bold text-slate-900">
-                      {Math.round((stats.completed / (stats.totalAudits || 1)) * 100)}%
+                      {Math.round(recentAudits.reduce((sum, a) => sum + (a.overallHealth || 0), 0) / (recentAudits.length || 1))}%
                     </p>
                   </div>
                   <div className="h-12 w-12 bg-slate-50 rounded-full flex items-center justify-center border border-slate-100">
-                    <AlertCircle className="h-6 w-6 text-slate-400" />
+                    <TrendingUp className="h-6 w-6 text-slate-400" />
                   </div>
                 </div>
               </CardContent>
@@ -179,9 +178,24 @@ export default function Dashboard() {
         <Card className="rounded-xl shadow-sm border-slate-200">
           <div className="flex items-center justify-between p-6 border-b border-slate-100">
             <h2 className="text-lg font-bold text-slate-900">Recent Audit Activity</h2>
-            <Button variant="ghost" className="text-sm text-slate-500 hover:text-slate-900">
-              View All Activity <ArrowRight className="ml-1 h-4 w-4" />
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="ghost"
+                size="sm"
+                className="text-xs text-red-500 hover:text-red-700 hover:bg-red-50"
+                onClick={() => {
+                  if (confirm('Clear all recent audit activity?')) {
+                    localStorage.removeItem('ai-performance-audit-agent-recent-audits');
+                    setRecentAudits([]);
+                  }
+                }}
+              >
+                Clear All
+              </Button>
+              <Button variant="ghost" className="text-sm text-slate-500 hover:text-slate-900">
+                View All Activity <ArrowRight className="ml-1 h-4 w-4" />
+              </Button>
+            </div>
           </div>
           <CardContent className="p-0">
             {isLoading ? (
@@ -205,25 +219,27 @@ export default function Dashboard() {
                     </tr>
                   </thead>
                   <tbody>
-                    {recentAudits.map((audit) => (
-                      <tr key={audit.run?.runId} className="border-b border-slate-100 last:border-0 hover:bg-slate-50/50 transition-colors">
+                    {recentAudits.map((audit, index) => (
+                      <tr key={`audit-${index}-${audit.runId || 'unknown'}`} className="border-b border-slate-100 last:border-0 hover:bg-slate-50/50 transition-colors">
                         <td className="px-6 py-4">
-                          <p className="font-semibold text-slate-900">{audit.run?.projectName || 'Unnamed Audit'}</p>
-                          <p className="text-xs text-slate-400 font-mono mt-0.5">ID: {audit.run?.runId.substring(0, 5).toUpperCase()}</p>
+                          <p className="font-semibold text-slate-900">{audit.projectName || 'Unnamed Audit'}</p>
+                          <p className="text-xs text-slate-400 font-mono mt-0.5">
+                            ID: {audit.runId ? audit.runId.substring(0, 8).toUpperCase() : 'N/A'}
+                          </p>
                         </td>
                         <td className="px-6 py-4">
                           <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold
-                            ${audit.status === 'completed' ? 'bg-green-100 text-green-800 border border-green-200' :
-                              audit.status === 'failed' ? 'bg-red-100 text-red-800 border border-red-200' :
-                                'bg-amber-100 text-amber-800 border border-amber-200'}`}>
-                            {audit.status === 'completed' ? 'Success' : audit.status === 'failed' ? 'Failed' : 'Warnings'}
+                            ${(audit.overallHealth || 0) >= 80 ? 'bg-green-100 text-green-800 border border-green-200' :
+                              (audit.overallHealth || 0) >= 50 ? 'bg-amber-100 text-amber-800 border border-amber-200' :
+                                'bg-red-100 text-red-800 border border-red-200'}`}>
+                            {(audit.overallHealth || 0) >= 80 ? 'Good' : (audit.overallHealth || 0) >= 50 ? 'Fair' : 'Poor'} ({audit.overallHealth || 0}%)
                           </span>
                         </td>
                         <td className="px-6 py-4 font-medium text-slate-700">
-                          {audit.pages.length}
+                          {audit.pageCount || 0}
                         </td>
                         <td className="px-6 py-4 text-slate-500">
-                          {audit.run?.generatedAt && formatDate(audit.run.generatedAt)}
+                          {audit.generatedAt ? formatDate(audit.generatedAt) : 'N/A'}
                         </td>
                         <td className="px-6 py-4 text-right">
                           <Link href="/results">

@@ -5,7 +5,11 @@ import {
   ComparisonDelta, 
   MetricResult,
   MetricName,
-  Device
+  Device,
+  CategoryScore,
+  CategoryScoreDelta,
+  CategoryName,
+  CWVAssessment
 } from '@/types';
 
 export function compareReports(
@@ -13,6 +17,7 @@ export function compareReports(
   current: ReportPackage
 ): ComparisonResult {
   const deltas: ComparisonDelta[] = [];
+  const categoryScoreDeltas: CategoryScoreDelta[] = [];
   const missingPages: string[] = [];
   const newPages: string[] = [];
   
@@ -45,6 +50,17 @@ export function compareReports(
     );
     
     deltas.push(...pageDeltas);
+    
+    // Compare category scores
+    const scoreDeltas = compareCategoryScores(
+      baseline,
+      current,
+      baselinePage.pageId,
+      currentPage.pageId,
+      baselinePage.pageLabel
+    );
+    
+    categoryScoreDeltas.push(...scoreDeltas);
   }
   
   // Find new pages
@@ -56,6 +72,7 @@ export function compareReports(
   
   return {
     deltas,
+    categoryScoreDeltas,
     missingPages,
     newPages,
     baselineRun: baseline.auditRun,
@@ -72,7 +89,7 @@ function comparePageMetrics(
 ): ComparisonDelta[] {
   const deltas: ComparisonDelta[] = [];
   const devices: Device[] = ['mobile', 'desktop'];
-  const metrics: MetricName[] = ['LCP', 'INP', 'CLS', 'FCP', 'TTFB'];
+  const metrics: MetricName[] = ['LCP', 'INP', 'CLS', 'FCP', 'TTFB', 'performance_score'];
   
   for (const device of devices) {
     for (const metricName of metrics) {
@@ -86,6 +103,37 @@ function comparePageMetrics(
       
       if (baselineMetric && currentMetric) {
         const delta = calculateDelta(baselineMetric, currentMetric, pageLabel);
+        deltas.push(delta);
+      }
+    }
+  }
+  
+  return deltas;
+}
+
+function compareCategoryScores(
+  baseline: ReportPackage,
+  current: ReportPackage,
+  baselinePageId: string,
+  currentPageId: string,
+  pageLabel: string
+): CategoryScoreDelta[] {
+  const deltas: CategoryScoreDelta[] = [];
+  const devices: Device[] = ['mobile', 'desktop'];
+  const categories: CategoryName[] = ['performance', 'accessibility', 'best-practices', 'seo'];
+  
+  for (const device of devices) {
+    for (const category of categories) {
+      const baselineScore = baseline.categoryScores?.find(
+        s => s.pageId === baselinePageId && s.device === device && s.category === category
+      );
+      
+      const currentScore = current.categoryScores?.find(
+        s => s.pageId === currentPageId && s.device === device && s.category === category
+      );
+      
+      if (baselineScore && currentScore) {
+        const delta = calculateCategoryScoreDelta(baselineScore, currentScore, pageLabel);
         deltas.push(delta);
       }
     }
@@ -116,7 +164,7 @@ function calculateDelta(
   }
   
   return {
-    baselineRunId: baseline.pageId, // Using pageId as proxy for runId in this context
+    baselineRunId: baseline.pageId,
     currentRunId: current.pageId,
     pageKey: pageLabel,
     metricName: current.metricName,
@@ -124,6 +172,35 @@ function calculateDelta(
     baselineValue: baseline.value,
     currentValue: current.value,
     deltaValue: Math.abs(deltaValue),
+    deltaDirection
+  };
+}
+
+function calculateCategoryScoreDelta(
+  baseline: CategoryScore,
+  current: CategoryScore,
+  pageLabel: string
+): CategoryScoreDelta {
+  const delta = current.score - baseline.score;
+  
+  let deltaDirection: 'improved' | 'regressed' | 'unchanged';
+  
+  // For scores, a change of 5+ points is significant
+  if (Math.abs(delta) < 5) {
+    deltaDirection = 'unchanged';
+  } else if (delta > 0) {
+    deltaDirection = 'improved';
+  } else {
+    deltaDirection = 'regressed';
+  }
+  
+  return {
+    pageKey: pageLabel,
+    category: current.category,
+    device: current.device,
+    baselineScore: baseline.score,
+    currentScore: current.score,
+    delta: Math.abs(delta),
     deltaDirection
   };
 }
@@ -137,6 +214,15 @@ export function getSignificantChanges(
     .sort((a, b) => b.deltaValue - a.deltaValue);
 }
 
+export function getSignificantCategoryChanges(
+  comparison: ComparisonResult,
+  type: 'regressed' | 'improved'
+): CategoryScoreDelta[] {
+  return comparison.categoryScoreDeltas
+    .filter(d => d.deltaDirection === type)
+    .sort((a, b) => b.delta - a.delta);
+}
+
 export function generateComparisonSummary(comparison: ComparisonResult): {
   totalCompared: number;
   improved: number;
@@ -144,6 +230,10 @@ export function generateComparisonSummary(comparison: ComparisonResult): {
   unchanged: number;
   missingPages: number;
   newPages: number;
+  categoryScoresCompared: number;
+  categoryScoresImproved: number;
+  categoryScoresRegressed: number;
+  categoryScoresUnchanged: number;
 } {
   return {
     totalCompared: comparison.deltas.length,
@@ -151,6 +241,55 @@ export function generateComparisonSummary(comparison: ComparisonResult): {
     regressed: comparison.deltas.filter(d => d.deltaDirection === 'regressed').length,
     unchanged: comparison.deltas.filter(d => d.deltaDirection === 'unchanged').length,
     missingPages: comparison.missingPages.length,
-    newPages: comparison.newPages.length
+    newPages: comparison.newPages.length,
+    categoryScoresCompared: comparison.categoryScoreDeltas.length,
+    categoryScoresImproved: comparison.categoryScoreDeltas.filter(d => d.deltaDirection === 'improved').length,
+    categoryScoresRegressed: comparison.categoryScoreDeltas.filter(d => d.deltaDirection === 'regressed').length,
+    categoryScoresUnchanged: comparison.categoryScoreDeltas.filter(d => d.deltaDirection === 'unchanged').length,
   };
+}
+
+// Compare CWV Assessments between baseline and current
+export function compareCWVAssessments(
+  baseline: CWVAssessment[],
+  current: CWVAssessment[]
+): {
+  pageId: string;
+  device: Device;
+  baselineStatus: CWVAssessment['status'];
+  currentStatus: CWVAssessment['status'];
+  changed: boolean;
+  improvement: boolean;
+}[] {
+  const results: {
+    pageId: string;
+    device: Device;
+    baselineStatus: CWVAssessment['status'];
+    currentStatus: CWVAssessment['status'];
+    changed: boolean;
+    improvement: boolean;
+  }[] = [];
+  
+  for (const currentAssessment of current) {
+    const baselineAssessment = baseline.find(
+      b => b.pageId === currentAssessment.pageId && b.device === currentAssessment.device
+    );
+    
+    if (baselineAssessment) {
+      const statusOrder = { 'passed': 2, 'failed': 1, 'not-available': 0 };
+      const baselineScore = statusOrder[baselineAssessment.status];
+      const currentScore = statusOrder[currentAssessment.status];
+      
+      results.push({
+        pageId: currentAssessment.pageId,
+        device: currentAssessment.device,
+        baselineStatus: baselineAssessment.status,
+        currentStatus: currentAssessment.status,
+        changed: baselineAssessment.status !== currentAssessment.status,
+        improvement: currentScore > baselineScore
+      });
+    }
+  }
+  
+  return results;
 }

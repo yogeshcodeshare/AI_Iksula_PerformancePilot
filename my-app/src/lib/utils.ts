@@ -10,29 +10,27 @@ export function cn(...inputs: ClassValue[]) {
 export function classifyMetric(value: number, metric: MetricName): Status {
   const threshold = THRESHOLDS[metric];
   if (!threshold) return 'needs-improvement';
-  
+
   if (value <= threshold.good) return 'good';
   if (value <= threshold.warn) return 'needs-improvement';
   return 'poor';
 }
 
 export function formatMetricValue(value: number, metric: MetricName): string {
-  const threshold = THRESHOLDS[metric];
-  if (!threshold) return String(value);
-  
-  if (threshold.unit === 'ms') {
-    if (value >= 1000) {
-      // Use 1 decimal place for values > 1000 to match Google PageSpeed Web UI
-      // e.g., "1.7 s" instead of "1.70 s" or "1705 ms"
-      return `${(value / 1000).toFixed(1)} s`;
-    }
+  // PageSpeed Insights specific display rules
+  if (metric === 'LCP' || metric === 'FCP' || metric === 'TTFB') {
+    return `${(value / 1000).toFixed(1)} s`;
+  }
+
+  if (metric === 'INP') {
     return `${Math.round(value)} ms`;
   }
-  
+
   if (metric === 'CLS') {
-    return value.toFixed(3);
+    // PageSpeed uses 2 decimal places usually, or 3 if very small. 2 is cleaner for summary.
+    return value.toFixed(2);
   }
-  
+
   return String(Math.round(value));
 }
 
@@ -53,13 +51,13 @@ export function formatDate(dateString: string): string {
 
 export function calculateOverallHealth(metrics: { status: Status }[]): number {
   if (metrics.length === 0) return 0;
-  
+
   const scores = {
     good: 100,
     'needs-improvement': 50,
     poor: 0,
   };
-  
+
   const total = metrics.reduce((sum, m) => sum + scores[m.status], 0);
   return Math.round(total / metrics.length);
 }

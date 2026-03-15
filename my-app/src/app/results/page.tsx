@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -16,6 +16,14 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
+import {
   Table,
   TableBody,
   TableCell,
@@ -23,15 +31,10 @@ import {
   TableHeader,
   TableRow
 } from '@/components/ui/table';
-import {
-  Accordion,
-  AccordionContent,
-  AccordionItem,
-  AccordionTrigger,
-} from "@/components/ui/accordion";
-import { AuditState, MetricResult, Device } from '@/types';
+import { AuditState, MetricResult, Device, CategoryName, ReportPackage } from '@/types';
 import { generateReportPackage, downloadJSON, downloadPDF, downloadPackage } from '@/services/export';
-import { getAuditState } from '@/services/storage';
+import { getAuditState, getAuditStateAsync, getBaselineReport, saveBaselineReport } from '@/services/storage';
+import { compareReports, generateComparisonSummary } from '@/services/comparison';
 import {
   formatMetricValue,
   formatDate,
@@ -48,16 +51,23 @@ import {
   Search,
   CheckCircle2,
   AlertTriangle,
+  AlertCircle,
   XCircle,
-  ExternalLink,
   ChevronRight,
-  ShieldCheck,
   Zap,
   Filter,
   ArrowUpRight,
   Globe,
   Clock,
-  Activity
+  Activity,
+  Upload,
+  GitCompare,
+  TrendingUp,
+  TrendingDown,
+  Minus,
+  X,
+  Info,
+  ShieldCheck
 } from 'lucide-react';
 import Link from 'next/link';
 import {
@@ -72,57 +82,220 @@ import {
   PieChart,
   Pie
 } from 'recharts';
+import { CWVAssessmentCard } from '@/components/results/CWVAssessmentCard';
+import { CategoryScoreCards } from '@/components/results/CategoryScoreCards';
+import { DiagnosticsPanel } from '@/components/results/DiagnosticsPanel';
+import { cn } from '@/lib/utils';
 
 export default function ResultsPage() {
   const router = useRouter();
   const [auditState, setAuditState] = useState<AuditState | null>(null);
   const [activeTab, setActiveTab] = useState('mobile');
   const [searchQuery, setSearchQuery] = useState('');
+  const [isLoading, setIsLoading] = useState(true);
 
   // Workspace active selections
   const [workspacePage, setWorkspacePage] = useState<string>('');
   const [workspaceDevice, setWorkspaceDevice] = useState<'mobile' | 'desktop'>('mobile');
-  const [workspaceCategoryTab, setWorkspaceCategoryTab] = useState('performance');
+  const [workspaceCategory, setWorkspaceCategory] = useState<CategoryName>('performance');
+
+  // Comparison state
+  const [baselineReport, setBaselineReport] = useState<ReportPackage | null>(null);
+  const [comparisonDialogOpen, setComparisonDialogOpen] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
 
   useEffect(() => {
+    loadAuditState();
+    loadBaselineReport();
+  }, []);
+
+  const loadAuditState = async () => {
+    setIsLoading(true);
+
     // Try to get from session first (for immediate results)
     const sessionData = sessionStorage.getItem('current-audit-state');
+
     if (sessionData) {
-      const state = JSON.parse(sessionData);
-      setAuditState(state);
-      if (state.pages && state.pages.length > 0) {
-        setWorkspacePage(state.pages[0].pageId);
+      try {
+        const state = JSON.parse(sessionData);
+
+        // Ensure new fields exist
+        if (!state.categoryScores) state.categoryScores = [];
+        if (!state.diagnostics) state.diagnostics = [];
+        if (!state.cwvAssessments) state.cwvAssessments = [];
+
+        setAuditState(state);
+        if (state.pages && state.pages.length > 0) {
+          setWorkspacePage(state.pages[0].pageId);
+        }
+        setIsLoading(false);
+        return;
+      } catch (e) {
+        console.error('Failed to parse session data:', e);
       }
-      return;
     }
 
-    // Fallback to localStorage
-    const stored = getAuditState();
+    // Fallback to IndexedDB/localStorage (Async version handles both)
+    const stored = await getAuditStateAsync();
+
     if (stored) {
       setAuditState(stored);
       if (stored.pages && stored.pages.length > 0) {
         setWorkspacePage(stored.pages[0].pageId);
       }
+      setIsLoading(false);
     } else {
+      console.log('[Results] No data found, redirecting to home');
       router.push('/');
     }
-  }, [router]);
+  };
 
-  if (!auditState || !auditState.run) {
+  const loadBaselineReport = () => {
+    const baseline = getBaselineReport();
+    if (baseline) {
+      setBaselineReport(baseline);
+    }
+  };
+
+  const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    setUploadError(null);
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const content = e.target?.result as string;
+        const parsed = JSON.parse(content);
+
+        // Validate schema
+        if (!parsed.auditRun || !parsed.pages || !parsed.metrics) {
+          setUploadError('Invalid report format. Missing required fields.');
+          return;
+        }
+
+        // Ensure new fields exist for backward compatibility
+        if (!parsed.categoryScores) parsed.categoryScores = [];
+        if (!parsed.diagnostics) parsed.diagnostics = [];
+        if (!parsed.cwvAssessments) parsed.cwvAssessments = [];
+
+        saveBaselineReport(parsed);
+        setBaselineReport(parsed);
+        setComparisonDialogOpen(false);
+      } catch (error) {
+        setUploadError('Failed to parse JSON file. Please ensure it is a valid audit report.');
+      }
+    };
+    reader.readAsText(file);
+  };
+
+  const clearBaseline = () => {
+    setBaselineReport(null);
+  };
+
+  const comparison = auditState && baselineReport
+    ? compareReports(baselineReport, generateReportPackage(
+      auditState.run!,
+      auditState.pages,
+      auditState.metrics,
+      auditState.categoryScores,
+      auditState.diagnostics,
+      auditState.cwvAssessments
+    ))
+    : null;
+
+  const comparisonSummary = comparison ? generateComparisonSummary(comparison) : null;
+
+  if (isLoading) {
     return (
       <div className="min-h-screen bg-slate-50 flex items-center justify-center">
         <div className="text-center">
-          <AlertTriangle className="h-12 w-12 text-slate-300 mx-auto mb-3" />
-          <p className="text-slate-500">No audit results found</p>
-          <Link href="/">
-            <Button variant="outline" className="mt-4">Go Home</Button>
-          </Link>
+          <Activity className="h-12 w-12 text-slate-300 mx-auto mb-3 animate-pulse" />
+          <p className="text-slate-500">Loading audit results...</p>
         </div>
       </div>
     );
   }
 
-  const { run, pages, metrics } = auditState;
+  if (!auditState || !auditState.run) {
+    return (
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center">
+        <div className="text-center max-w-md p-6">
+          <AlertCircle className="h-12 w-12 text-amber-500 mx-auto mb-3" />
+          <p className="text-slate-700 font-medium mb-2">No audit data found</p>
+          <p className="text-slate-500 text-sm mb-4">
+            You need to run an audit first before viewing results.
+            Data is stored temporarily and will be lost if you refresh the page.
+          </p>
+          <div className="flex gap-2 justify-center mb-4">
+            <Link href="/audit">
+              <Button>Start New Audit</Button>
+            </Link>
+            <Link href="/">
+              <Button variant="outline">Go Home</Button>
+            </Link>
+          </div>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => {
+              // Load sample data for testing
+              const sampleState = {
+                run: {
+                  runId: 'sample-run-001',
+                  projectName: 'Sample Project',
+                  auditLabel: 'Test Audit',
+                  environment: 'production',
+                  generatedAt: new Date().toISOString(),
+                  schemaVersion: '1.0.0'
+                },
+                pages: [
+                  { pageId: 'page-1', runId: 'sample-run-001', pageLabel: 'Homepage', pageType: 'homepage', url: 'https://example.com', sortOrder: 0 },
+                  { pageId: 'page-2', runId: 'sample-run-001', pageLabel: 'Products', pageType: 'category', url: 'https://example.com/products', sortOrder: 1 }
+                ],
+                metrics: [
+                  { pageId: 'page-1', device: 'mobile', metricName: 'LCP', value: 2500, unit: 'ms', thresholdGood: 2500, thresholdWarn: 4000, status: 'good', sourceAttempted: 'pagespeed', sourceUsed: 'pagespeed', fallbackTriggered: false, capturedAt: new Date().toISOString() },
+                  { pageId: 'page-1', device: 'mobile', metricName: 'INP', value: 150, unit: 'ms', thresholdGood: 200, thresholdWarn: 500, status: 'good', sourceAttempted: 'pagespeed', sourceUsed: 'pagespeed', fallbackTriggered: false, capturedAt: new Date().toISOString() },
+                  { pageId: 'page-1', device: 'mobile', metricName: 'CLS', value: 0.05, unit: '', thresholdGood: 0.1, thresholdWarn: 0.25, status: 'good', sourceAttempted: 'pagespeed', sourceUsed: 'pagespeed', fallbackTriggered: false, capturedAt: new Date().toISOString() },
+                  { pageId: 'page-1', device: 'mobile', metricName: 'FCP', value: 1200, unit: 'ms', thresholdGood: 1800, thresholdWarn: 3000, status: 'good', sourceAttempted: 'pagespeed', sourceUsed: 'pagespeed', fallbackTriggered: false, capturedAt: new Date().toISOString() },
+                  { pageId: 'page-1', device: 'mobile', metricName: 'TTFB', value: 600, unit: 'ms', thresholdGood: 800, thresholdWarn: 1800, status: 'good', sourceAttempted: 'pagespeed', sourceUsed: 'pagespeed', fallbackTriggered: false, capturedAt: new Date().toISOString() },
+                  { pageId: 'page-1', device: 'desktop', metricName: 'LCP', value: 1800, unit: 'ms', thresholdGood: 2500, thresholdWarn: 4000, status: 'good', sourceAttempted: 'pagespeed', sourceUsed: 'pagespeed', fallbackTriggered: false, capturedAt: new Date().toISOString() },
+                  { pageId: 'page-1', device: 'desktop', metricName: 'INP', value: 80, unit: 'ms', thresholdGood: 200, thresholdWarn: 500, status: 'good', sourceAttempted: 'pagespeed', sourceUsed: 'pagespeed', fallbackTriggered: false, capturedAt: new Date().toISOString() },
+                  { pageId: 'page-1', device: 'desktop', metricName: 'CLS', value: 0.02, unit: '', thresholdGood: 0.1, thresholdWarn: 0.25, status: 'good', sourceAttempted: 'pagespeed', sourceUsed: 'pagespeed', fallbackTriggered: false, capturedAt: new Date().toISOString() },
+                  { pageId: 'page-2', device: 'mobile', metricName: 'LCP', value: 3200, unit: 'ms', thresholdGood: 2500, thresholdWarn: 4000, status: 'needs-improvement', sourceAttempted: 'pagespeed', sourceUsed: 'pagespeed', fallbackTriggered: false, capturedAt: new Date().toISOString() },
+                ],
+                categoryScores: [
+                  { pageId: 'page-1', device: 'mobile', category: 'performance', score: 85, source: 'pagespeed', capturedAt: new Date().toISOString() },
+                  { pageId: 'page-1', device: 'mobile', category: 'accessibility', score: 92, source: 'pagespeed', capturedAt: new Date().toISOString() },
+                  { pageId: 'page-1', device: 'mobile', category: 'best-practices', score: 78, source: 'pagespeed', capturedAt: new Date().toISOString() },
+                  { pageId: 'page-1', device: 'mobile', category: 'seo', score: 95, source: 'pagespeed', capturedAt: new Date().toISOString() },
+                  { pageId: 'page-1', device: 'desktop', category: 'performance', score: 92, source: 'pagespeed', capturedAt: new Date().toISOString() },
+                ],
+                diagnostics: [
+                  { id: 'diag-1', pageId: 'page-1', device: 'mobile', category: 'performance', group: 'insights', auditKey: 'unused-javascript', title: 'Reduce unused JavaScript', description: 'Remove unused JavaScript to reduce bytes consumed by network activity.', status: 'fail', scoreDisplayMode: 'binary', score: 0, displayValue: '1.5s', source: 'pagespeed', capturedAt: new Date().toISOString() },
+                  { id: 'diag-2', pageId: 'page-1', device: 'mobile', category: 'performance', group: 'insights', auditKey: 'modern-image-formats', title: 'Serve modern image formats', description: 'Image formats like WebP and AVIF often provide better compression.', status: 'fail', scoreDisplayMode: 'binary', score: 0, displayValue: '450KB', source: 'pagespeed', capturedAt: new Date().toISOString() },
+                  { id: 'diag-3', pageId: 'page-1', device: 'mobile', category: 'accessibility', group: 'aria', auditKey: 'aria-roles', title: 'ARIA roles are valid', description: 'Screen readers require valid ARIA roles.', status: 'pass', scoreDisplayMode: 'binary', score: 1, source: 'pagespeed', capturedAt: new Date().toISOString() },
+                ],
+                cwvAssessments: [
+                  { pageId: 'page-1', device: 'mobile', passed: true, status: 'passed', lcp: { value: 2500, displayValue: '2.5s', status: 'good' }, inp: { value: 150, displayValue: '150ms', status: 'good' }, cls: { value: 0.05, displayValue: '0.050', status: 'good' }, fcp: { value: 1200, displayValue: '1.2s', status: 'good' }, ttfb: { value: 600, displayValue: '600ms', status: 'good' }, interpretation: 'This page passes Core Web Vitals on mobile.', source: 'pagespeed', fallbackTriggered: false, capturedAt: new Date().toISOString() },
+                  { pageId: 'page-1', device: 'desktop', passed: true, status: 'passed', lcp: { value: 1800, displayValue: '1.8s', status: 'good' }, inp: { value: 80, displayValue: '80ms', status: 'good' }, cls: { value: 0.02, displayValue: '0.020', status: 'good' }, fcp: { value: 900, displayValue: '0.9s', status: 'good' }, ttfb: { value: 400, displayValue: '400ms', status: 'good' }, interpretation: 'This page passes Core Web Vitals on desktop.', source: 'pagespeed', fallbackTriggered: false, capturedAt: new Date().toISOString() },
+                ],
+                status: 'completed',
+                progress: { total: 4, completed: 4 }
+              };
+              sessionStorage.setItem('current-audit-state', JSON.stringify(sampleState));
+              window.location.reload();
+            }}
+          >
+            Load Demo Data
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  const { run, pages, metrics, categoryScores = [], diagnostics = [], cwvAssessments = [] } = auditState;
 
   // Filter pages for Detailed Results list
   const filteredPages = pages.filter(p =>
@@ -135,7 +308,6 @@ export default function ResultsPage() {
   const warnCount = metrics.filter(m => m.status === 'needs-improvement').length;
   const poorCount = metrics.filter(m => m.status === 'poor').length;
   const overallHealth = calculateOverallHealth(metrics);
-
   const fallbackCount = metrics.filter(m => m.fallbackTriggered).length;
 
   const statusData = [
@@ -154,30 +326,69 @@ export default function ResultsPage() {
   });
 
   const handleDownloadJSON = () => {
-    const pkg = generateReportPackage(run, pages, metrics);
+    const pkg = generateReportPackage(run, pages, metrics, categoryScores, diagnostics, cwvAssessments);
     downloadJSON(pkg);
   };
 
   const handleDownloadPDF = () => {
-    const pkg = generateReportPackage(run, pages, metrics);
+    const pkg = generateReportPackage(run, pages, metrics, categoryScores, diagnostics, cwvAssessments);
     downloadPDF(pkg);
   };
 
   const handleDownloadPackage = async () => {
-    const pkg = generateReportPackage(run, pages, metrics);
+    const pkg = generateReportPackage(run, pages, metrics, categoryScores, diagnostics, cwvAssessments);
     await downloadPackage(pkg);
   };
 
   // Workspace active page data
   const actPage = pages.find(p => p.pageId === workspacePage) || pages[0];
   const actPageMetrics = metrics.filter(m => m.pageId === actPage?.pageId && m.device === workspaceDevice);
-  const getWMetric = (name: string) => actPageMetrics.find(m => m.metricName === name);
   const actSourceUsed = actPageMetrics[0]?.sourceUsed || 'pagespeed';
+  const actFallbackTriggered = actPageMetrics[0]?.fallbackTriggered || false;
+  const actFallbackReason = actPageMetrics[0]?.fallbackReason;
+
+  // Get CWV Assessment for active page/device
+  const actCWVAssessment = cwvAssessments.find(
+    a => a.pageId === actPage?.pageId && a.device === workspaceDevice
+  ) || null;
+
+  // Get category scores for active page/device
+  const actCategoryScores = categoryScores.filter(
+    cs => cs.pageId === actPage?.pageId && cs.device === workspaceDevice
+  );
+
+  // Get baseline category scores for comparison
+  const baselineCategoryScores = baselineReport?.categoryScores?.filter(
+    cs => {
+      const baselinePage = baselineReport.pages.find(p => p.pageId === cs.pageId);
+      const currentPage = actPage;
+      return baselinePage && currentPage &&
+        baselinePage.url === currentPage.url &&
+        baselinePage.pageType === currentPage.pageType &&
+        cs.device === workspaceDevice;
+    }
+  ) || [];
+
+  // Filter diagnostics for active page/device/category
+  const actDiagnostics = diagnostics.filter(
+    d => d.category === workspaceCategory &&
+      d.device === workspaceDevice &&
+      d.pageId === actPage?.pageId
+  );
+
+  // Get page comparison data
+  const getPageComparisonData = (pageId: string, device: Device) => {
+    if (!comparison) return null;
+    return comparison.deltas.filter(d =>
+      d.pageKey === pages.find(p => p.pageId === pageId)?.pageLabel &&
+      d.device === device
+    );
+  };
 
   return (
     <div className="bg-slate-50 min-h-[calc(100vh-4rem)] pb-24">
-      {/* Top Navigation Row */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+        {/* Header */}
         <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
           <div>
             <div className="flex items-center gap-2 text-sm text-slate-500 mb-2">
@@ -199,6 +410,65 @@ export default function ResultsPage() {
           </div>
 
           <div className="flex flex-wrap gap-2">
+
+            {/* Compare Button */}
+            <Dialog open={comparisonDialogOpen} onOpenChange={setComparisonDialogOpen}>
+              <DialogTrigger asChild>
+                <Button
+                  variant={baselineReport ? "default" : "outline"}
+                  className={cn(
+                    "border-slate-200",
+                    baselineReport ? "bg-indigo-600 hover:bg-indigo-700 text-white" : "bg-white"
+                  )}
+                >
+                  <GitCompare className="h-4 w-4 mr-2" />
+                  {baselineReport ? 'Comparing' : 'Compare'}
+                </Button>
+              </DialogTrigger>
+              <DialogContent className="sm:max-w-md">
+                <DialogHeader>
+                  <DialogTitle>Compare with Previous Report</DialogTitle>
+                  <DialogDescription>
+                    Upload a previous audit report JSON file to compare against current results.
+                  </DialogDescription>
+                </DialogHeader>
+                <div className="space-y-4 py-4">
+                  {baselineReport ? (
+                    <div className="p-4 bg-slate-50 rounded-lg border border-slate-200">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <p className="font-medium text-slate-900">{baselineReport.auditRun.auditLabel}</p>
+                          <p className="text-sm text-slate-500">
+                            {formatDate(baselineReport.auditRun.generatedAt)}
+                          </p>
+                        </div>
+                        <Button variant="ghost" size="sm" onClick={clearBaseline}>
+                          <X className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="flex flex-col items-center justify-center border-2 border-dashed border-slate-200 rounded-lg p-8">
+                      <Upload className="h-8 w-8 text-slate-400 mb-2" />
+                      <p className="text-sm text-slate-500 mb-4">Upload audit report JSON</p>
+                      <Input
+                        type="file"
+                        accept=".json"
+                        onChange={handleFileUpload}
+                        className="max-w-xs"
+                      />
+                    </div>
+                  )}
+                  {uploadError && (
+                    <p className="text-sm text-red-600 flex items-center">
+                      <AlertTriangle className="h-4 w-4 mr-1" />
+                      {uploadError}
+                    </p>
+                  )}
+                </div>
+              </DialogContent>
+            </Dialog>
+
             <Button variant="outline" onClick={handleDownloadJSON} className="bg-white border-slate-200">
               <FileText className="h-4 w-4 mr-2" /> Export JSON
             </Button>
@@ -210,6 +480,31 @@ export default function ResultsPage() {
             </Button>
           </div>
         </div>
+
+        {/* Comparison Summary Banner */}
+        {comparisonSummary && (
+          <Card className="mt-6 bg-indigo-50 border-indigo-200">
+            <CardContent className="p-4">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-4">
+                  <GitCompare className="h-5 w-5 text-indigo-600" />
+                  <div>
+                    <p className="text-sm font-medium text-indigo-900">
+                      Comparing with {baselineReport?.auditRun.auditLabel}
+                    </p>
+                    <p className="text-xs text-indigo-600">
+                      {comparisonSummary.improved} improvements, {comparisonSummary.regressed} regressions
+                      {comparisonSummary.categoryScoresImproved > 0 && `, ${comparisonSummary.categoryScoresImproved} category scores improved`}
+                    </p>
+                  </div>
+                </div>
+                <Button variant="ghost" size="sm" onClick={clearBaseline} className="text-indigo-600">
+                  Clear
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        )}
 
         {/* Global Summary Cards */}
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mt-8 mb-8">
@@ -251,7 +546,7 @@ export default function ResultsPage() {
                 </div>
               </div>
               <div className="h-10 w-10 bg-indigo-50 rounded-lg flex items-center justify-center border border-indigo-100">
-                <Search className="h-5 w-5 text-indigo-500" />
+                <Activity className="h-5 w-5 text-indigo-500" />
               </div>
             </CardContent>
           </Card>
@@ -361,7 +656,6 @@ export default function ResultsPage() {
             </div>
 
             <div className="flex flex-col sm:flex-row items-center gap-3 w-full md:w-auto">
-              {/* TABS FOR THIS SECTION */}
               <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full sm:w-auto">
                 <TabsList className="h-9 p-1 bg-slate-100 rounded-lg w-full">
                   <TabsTrigger value="mobile" className="text-xs h-7 rounded-md px-4 font-semibold data-[state=active]:bg-slate-900 data-[state=active]:text-white data-[state=active]:shadow-sm">
@@ -421,26 +715,42 @@ export default function ResultsPage() {
                     const fcp = pageMetrics.find(m => m.metricName === 'FCP');
                     const ttfb = pageMetrics.find(m => m.metricName === 'TTFB');
 
+                    // Get comparison deltas for this page
+                    const pageComparison = getPageComparisonData(page.pageId, activeTab as Device);
+
+                    const MetricCell = ({ metric }: { metric?: typeof lcp }) => {
+                      if (!metric) return <span className="text-slate-300">-</span>;
+
+                      const metricComparison = pageComparison?.find(d => d.metricName === metric.metricName);
+                      const hasComparison = metricComparison && metricComparison.deltaDirection !== 'unchanged';
+
+                      return (
+                        <div className="flex items-center gap-1">
+                          <span className={`font-medium ${getStatusColor(metric.status)}`}>
+                            {formatMetricValue(metric.value, metric.metricName)}
+                          </span>
+                          {hasComparison && (
+                            <span className={cn(
+                              "text-xs",
+                              metricComparison.deltaDirection === 'improved' ? 'text-green-600' : 'text-red-600'
+                            )}>
+                              {metricComparison.deltaDirection === 'improved' ? '↓' : '↑'}
+                            </span>
+                          )}
+                        </div>
+                      );
+                    };
+
                     return (
                       <TableRow key={page.pageId} className="border-b border-slate-100 transition-colors hover:bg-slate-50 group">
                         <TableCell className="font-medium text-slate-900 py-4">
                           {page.pageLabel}
                         </TableCell>
-                        <TableCell>
-                          {lcp ? <span className={`font-medium ${getStatusColor(lcp.status)}`}>{formatMetricValue(lcp.value, 'LCP')}</span> : <span className="text-slate-300">-</span>}
-                        </TableCell>
-                        <TableCell>
-                          {inp ? <span className={`font-medium ${getStatusColor(inp.status)}`}>{formatMetricValue(inp.value, 'INP')}</span> : <span className="text-slate-300">-</span>}
-                        </TableCell>
-                        <TableCell>
-                          {cls ? <span className={`font-medium ${getStatusColor(cls.status)}`}>{formatMetricValue(cls.value, 'CLS')}</span> : <span className="text-slate-300">-</span>}
-                        </TableCell>
-                        <TableCell>
-                          {fcp ? <span className={`font-medium ${getStatusColor(fcp.status)}`}>{formatMetricValue(fcp.value, 'FCP')}</span> : <span className="text-slate-300">-</span>}
-                        </TableCell>
-                        <TableCell>
-                          {ttfb ? <span className={`font-medium ${getStatusColor(ttfb.status)}`}>{formatMetricValue(ttfb.value, 'TTFB')}</span> : <span className="text-slate-300">-</span>}
-                        </TableCell>
+                        <TableCell><MetricCell metric={lcp} /></TableCell>
+                        <TableCell><MetricCell metric={inp} /></TableCell>
+                        <TableCell><MetricCell metric={cls} /></TableCell>
+                        <TableCell><MetricCell metric={fcp} /></TableCell>
+                        <TableCell><MetricCell metric={ttfb} /></TableCell>
                         <TableCell className="text-slate-500 text-sm">
                           {source} {hasFB && <Badge variant="outline" className="ml-1 text-[10px] leading-tight px-1 py-0 border-amber-200 text-amber-600 bg-amber-50">FB</Badge>}
                         </TableCell>
@@ -479,259 +789,159 @@ export default function ResultsPage() {
 
         {/* DIAGNOSTIC WORKSPACE */}
         <div id="diagnostic-workspace" className="mb-12">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-4">
+          {/* Workspace Controls */}
+          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 mb-6">
             <div className="flex items-center gap-3">
-              <h2 className="text-2xl font-bold tracking-tight text-slate-900">Diagnostic Workspace <Badge className="bg-blue-100 text-blue-700 hover:bg-blue-100 border-none ml-2 rounded-sm tracking-widest text-[10px] uppercase">Beta</Badge></h2>
-              <span className="text-slate-300 mx-2 hidden sm:inline">|</span>
-              <div className="flex items-center text-sm font-medium">
-                <span className="text-slate-500 mr-2">Analyzing:</span>
+              <h2 className="text-2xl font-bold tracking-tight text-slate-900">
+                Page Diagnostics
+                <Badge className="bg-blue-100 text-blue-700 hover:bg-blue-100 border-none ml-2 rounded-sm tracking-widest text-[10px] uppercase">
+                  Detailed Analysis
+                </Badge>
+              </h2>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-3">
+              {/* Page Selector */}
+              <div className="flex items-center text-sm">
+                <span className="text-slate-500 mr-2">Page:</span>
                 <Select value={workspacePage} onValueChange={setWorkspacePage}>
-                  <SelectTrigger className="h-8 border-none bg-transparent hover:bg-slate-100 font-bold text-slate-900 focus:ring-0 shadow-none px-2 underline underline-offset-4 decoration-2 decoration-blue-500">
+                  <SelectTrigger className="h-9 w-[200px] border-slate-200">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
                     {pages.map((p) => (
-                      <SelectItem key={p.pageId} value={p.pageId}>{p.pageLabel}</SelectItem>
+                      <SelectItem key={p.pageId} value={p.pageId}>
+                        <div className="flex items-center">
+                          <span className="truncate">{p.pageLabel}</span>
+                          <span className="text-xs text-slate-400 ml-2">({p.pageType})</span>
+                        </div>
+                      </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
               </div>
-            </div>
-            <div className="flex gap-2 items-center">
+
+              {/* Device Toggle */}
               <Tabs value={workspaceDevice} onValueChange={(v) => setWorkspaceDevice(v as 'mobile' | 'desktop')}>
-                <TabsList className="h-8 p-1 bg-slate-200/50 rounded-md">
-                  <TabsTrigger value="mobile" className="text-xs h-6 rounded-sm px-3 data-[state=active]:bg-white data-[state=active]:shadow-sm">Mobile</TabsTrigger>
-                  <TabsTrigger value="desktop" className="text-xs h-6 rounded-sm px-3 data-[state=active]:bg-white data-[state=active]:shadow-sm">Desktop</TabsTrigger>
+                <TabsList className="h-9 p-1 bg-slate-200/50 rounded-md">
+                  <TabsTrigger value="mobile" className="text-xs h-7 rounded-sm px-3 data-[state=active]:bg-white data-[state=active]:shadow-sm">
+                    <Smartphone className="h-3.5 w-3.5 mr-1.5" /> Mobile
+                  </TabsTrigger>
+                  <TabsTrigger value="desktop" className="text-xs h-7 rounded-sm px-3 data-[state=active]:bg-white data-[state=active]:shadow-sm">
+                    <Monitor className="h-3.5 w-3.5 mr-1.5" /> Desktop
+                  </TabsTrigger>
                 </TabsList>
               </Tabs>
-              <Button variant="outline" size="sm" className="h-8 text-slate-600 border-slate-200">
-                <ArrowUpRight className="h-3.5 w-3.5 mr-1.5" /> Open PageSpeed Report
-              </Button>
+
+              {/* Source Badge */}
+              <Badge
+                variant="outline"
+                className={cn(
+                  "text-[10px] uppercase tracking-wider",
+                  actSourceUsed === 'pagespeed' && !actFallbackTriggered
+                    ? "border-blue-200 text-blue-700 bg-blue-50"
+                    : "border-amber-200 text-amber-700 bg-amber-50"
+                )}
+              >
+                {actSourceUsed === 'pagespeed' && !actFallbackTriggered ? 'PageSpeed' : 'Lighthouse FB'}
+              </Badge>
             </div>
           </div>
 
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-            {/* Vitals Sidebar */}
-            <div className="lg:col-span-4 space-y-4">
-              <Card className="rounded-xl shadow-sm border-slate-200 overflow-hidden">
-                <div className="p-4 bg-slate-50 border-b border-slate-100 flex justify-between items-center">
-                  <div className="flex items-center gap-2 font-bold text-slate-800">
-                    <Activity className="h-4 w-4" /> Core Web Vitals
-                  </div>
-                  <Badge className="bg-green-100 text-green-700 border-green-200 hover:bg-green-100 shadow-none">
-                    <ShieldCheck className="w-3.5 h-3.5 mr-1" /> Passing
-                  </Badge>
-                </div>
-                <div className="divide-y divide-slate-100">
-                  {/* LCP */}
-                  <div className="p-4 hover:bg-slate-50 transition-colors">
-                    <div className="flex justify-between items-end mb-1">
-                      <p className="text-sm font-semibold text-slate-700 mt-1">Largest Contentful Paint (LCP)</p>
-                      <span className={`text-lg font-bold ${getStatusColor(getWMetric('LCP')?.status || 'good')}`}>
-                        {formatMetricValue(getWMetric('LCP')?.value || 0, 'LCP')}
-                      </span>
-                    </div>
-                    <div className="flex justify-between items-center">
-                      <div className="w-full bg-slate-200 rounded-full h-1.5 mr-4 overflow-hidden">
-                        <div className="bg-green-500 h-1.5 rounded-full" style={{ width: '40%' }}></div>
-                      </div>
-                      <span className="text-[10px] text-slate-400 whitespace-nowrap">Target: &lt; 2.5s</span>
-                    </div>
-                  </div>
-                  {/* INP */}
-                  <div className="p-4 hover:bg-slate-50 transition-colors">
-                    <div className="flex justify-between items-end mb-1">
-                      <p className="text-sm font-semibold text-slate-700 mt-1">Interaction to Next Paint (INP)</p>
-                      <span className={`text-lg font-bold ${getStatusColor(getWMetric('INP')?.status || 'good')}`}>
-                        {formatMetricValue(getWMetric('INP')?.value || 0, 'INP')}
-                      </span>
-                    </div>
-                    <div className="flex justify-between items-center">
-                      <div className="w-full bg-slate-200 rounded-full h-1.5 mr-4 overflow-hidden">
-                        <div className="bg-yellow-500 h-1.5 rounded-full" style={{ width: '65%' }}></div>
-                      </div>
-                      <span className="text-[10px] text-slate-400 whitespace-nowrap">Target: &lt; 200ms</span>
-                    </div>
-                  </div>
-                  {/* CLS */}
-                  <div className="p-4 hover:bg-slate-50 transition-colors">
-                    <div className="flex justify-between items-end mb-1">
-                      <p className="text-sm font-semibold text-slate-700 mt-1">Cumulative Layout Shift (CLS)</p>
-                      <span className={`text-lg font-bold ${getStatusColor(getWMetric('CLS')?.status || 'good')}`}>
-                        {formatMetricValue(getWMetric('CLS')?.value || 0, 'CLS')}
-                      </span>
-                    </div>
-                    <div className="flex justify-between items-center">
-                      <div className="w-full bg-slate-200 rounded-full h-1.5 mr-4 overflow-hidden">
-                        <div className="bg-green-500 h-1.5 rounded-full" style={{ width: '10%' }}></div>
-                      </div>
-                      <span className="text-[10px] text-slate-400 whitespace-nowrap">Target: &lt; 0.1</span>
-                    </div>
-                  </div>
-                  {/* FCP */}
-                  <div className="p-4 hover:bg-slate-50 transition-colors">
-                    <div className="flex justify-between items-end mb-1">
-                      <p className="text-sm font-semibold text-slate-700 mt-1">First Contentful Paint (FCP)</p>
-                      <span className={`text-lg font-bold ${getStatusColor(getWMetric('FCP')?.status || 'good')}`}>
-                        {formatMetricValue(getWMetric('FCP')?.value || 0, 'FCP')}
-                      </span>
-                    </div>
-                    <div className="flex justify-between items-center">
-                      <div className="w-full bg-slate-200 rounded-full h-1.5 mr-4 overflow-hidden">
-                        <div className="bg-green-500 h-1.5 rounded-full" style={{ width: '30%' }}></div>
-                      </div>
-                      <span className="text-[10px] text-slate-400 whitespace-nowrap">Target: &lt; 1.8s</span>
-                    </div>
-                  </div>
-                  {/* TTFB */}
-                  <div className="p-4 hover:bg-slate-50 transition-colors">
-                    <div className="flex justify-between items-end mb-1">
-                      <p className="text-sm font-semibold text-slate-700 mt-1">Time to First Byte (TTFB)</p>
-                      <span className={`text-lg font-bold ${getStatusColor(getWMetric('TTFB')?.status || 'good')}`}>
-                        {formatMetricValue(getWMetric('TTFB')?.value || 0, 'TTFB')}
-                      </span>
-                    </div>
-                    <div className="flex justify-between items-center">
-                      <div className="w-full bg-slate-200 rounded-full h-1.5 mr-4 overflow-hidden">
-                        <div className="bg-green-500 h-1.5 rounded-full" style={{ width: '15%' }}></div>
-                      </div>
-                      <span className="text-[10px] text-slate-400 whitespace-nowrap">Target: &lt; 800ms</span>
-                    </div>
-                  </div>
-                </div>
-              </Card>
-            </div>
-
-            {/* Main Score Area */}
-            <div className="lg:col-span-8 flex flex-col gap-6">
-              {/* Category Scores */}
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                <Card onClick={() => setWorkspaceCategoryTab('performance')} className={`cursor-pointer rounded-xl border-slate-200 shadow-sm transition-all ${workspaceCategoryTab === 'performance' ? 'ring-2 ring-slate-900 ring-offset-2' : 'hover:bg-slate-50'}`}>
-                  <CardContent className="p-4 text-center">
-                    <div className="text-3xl font-black text-slate-900 mb-1">94</div>
-                    <div className="flex items-center justify-center gap-1.5 text-xs font-semibold text-slate-500">
-                      <Zap className="w-3.5 h-3.5 text-blue-500" /> PERFORMANCE
-                    </div>
-                  </CardContent>
-                </Card>
-                <Card onClick={() => setWorkspaceCategoryTab('accessibility')} className={`cursor-pointer rounded-xl border-slate-200 shadow-sm transition-all ${workspaceCategoryTab === 'accessibility' ? 'ring-2 ring-slate-900 ring-offset-2' : 'hover:bg-slate-50'}`}>
-                  <CardContent className="p-4 text-center">
-                    <div className="text-3xl font-black text-slate-900 mb-1">100</div>
-                    <div className="flex items-center justify-center gap-1.5 text-xs font-semibold text-slate-500">
-                      <ShieldCheck className="w-3.5 h-3.5 text-emerald-500" /> ACCESSIBILITY
-                    </div>
-                  </CardContent>
-                </Card>
-                <Card onClick={() => setWorkspaceCategoryTab('best-practices')} className={`cursor-pointer rounded-xl border-slate-200 shadow-sm transition-all ${workspaceCategoryTab === 'best-practices' ? 'ring-2 ring-slate-900 ring-offset-2' : 'hover:bg-slate-50'}`}>
-                  <CardContent className="p-4 text-center">
-                    <div className="text-3xl font-black text-slate-900 mb-1">92</div>
-                    <div className="flex items-center justify-center gap-1.5 text-xs font-semibold text-slate-500">
-                      <CheckCircle2 className="w-3.5 h-3.5 text-indigo-500" /> BEST PRACTICES
-                    </div>
-                  </CardContent>
-                </Card>
-                <Card onClick={() => setWorkspaceCategoryTab('seo')} className={`cursor-pointer rounded-xl border-slate-200 shadow-sm transition-all ${workspaceCategoryTab === 'seo' ? 'ring-2 ring-slate-900 ring-offset-2' : 'hover:bg-slate-50'}`}>
-                  <CardContent className="p-4 text-center">
-                    <div className="text-3xl font-black text-slate-900 mb-1">100</div>
-                    <div className="flex items-center justify-center gap-1.5 text-xs font-semibold text-slate-500">
-                      <Search className="w-3.5 h-3.5 text-amber-500" /> SEO
-                    </div>
-                  </CardContent>
-                </Card>
-              </div>
-
-              {/* Diagnostic Accordions Panel */}
-              <Card className="rounded-xl shadow-sm border-slate-200">
-                <CardHeader className="pb-4 border-b border-slate-100 bg-white rounded-t-xl">
-                  <CardTitle className="text-[13px] font-bold tracking-widest text-slate-500 uppercase">Diagnose Issues & Opportunities</CardTitle>
-                </CardHeader>
-                <CardContent className="p-0">
-                  <Accordion type="single" collapsible defaultValue="item-1" className="w-full border-none">
-                    <AccordionItem value="item-1" className="border-b border-slate-100 px-4">
-                      <AccordionTrigger className="hover:no-underline py-4">
-                        <div className="flex items-center gap-3 w-full">
-                          <div className="w-8 h-8 rounded-md bg-red-50 text-red-500 flex items-center justify-center shrink-0">
-                            <ArrowUpRight className="w-4 h-4" />
-                          </div>
-                          <div className="flex-1 text-left">
-                            <div className="flex items-center gap-3">
-                              <h4 className="font-bold text-slate-900 text-[15px]">Reduce unused JavaScript</h4>
-                              <span className="text-[10px] font-bold tracking-wider uppercase bg-red-100 text-red-700 px-2 py-0.5 rounded">High Severity</span>
-                            </div>
-                            <p className="text-xs text-slate-500 mt-1">Estimated savings: 1,450ms</p>
-                          </div>
-                        </div>
-                      </AccordionTrigger>
-                      <AccordionContent className="pb-6 pl-11 pr-4">
-                        <div className="bg-slate-50 rounded-lg p-4 border border-slate-200">
-                          <p className="text-sm text-slate-700 leading-relaxed mb-4">
-                            JavaScript execution time is significantly impacting the main thread. We identified several third-party scripts that are not required for the initial viewport render.
-                          </p>
-                          <div className="mb-4">
-                            <h5 className="text-[11px] font-bold tracking-widest text-slate-500 uppercase mb-2">Affected Resources:</h5>
-                            <div className="bg-white border md:border-slate-200 border-none rounded-md text-xs font-mono">
-                              <div className="flex justify-between py-2 px-3 border-b border-slate-100">
-                                <span className="text-slate-600 truncate mr-4">...static/js/vendor-analytics.js</span>
-                                <span className="text-red-600 font-semibold shrink-0">450kb</span>
-                              </div>
-                              <div className="flex justify-between py-2 px-3">
-                                <span className="text-slate-600 truncate mr-4">...static/js/marketing-pixel.js</span>
-                                <span className="text-red-600 font-semibold shrink-0">120kb</span>
-                              </div>
-                            </div>
-                          </div>
-                          <div className="flex items-center gap-2 text-sm text-blue-700 bg-blue-50/50 p-2 rounded">
-                            <ExternalLink className="w-4 h-4" />
-                            <span className="font-medium">Recommendation:</span> <a href="#" className="underline">Defer non-critical scripts or use a Web Worker.</a>
-                          </div>
-                        </div>
-                      </AccordionContent>
-                    </AccordionItem>
-
-                    <AccordionItem value="item-2" className="border-b border-slate-100 px-4">
-                      <AccordionTrigger className="hover:no-underline py-4">
-                        <div className="flex items-center gap-3 w-full">
-                          <div className="w-8 h-8 rounded-md bg-amber-50 text-amber-500 flex items-center justify-center shrink-0">
-                            <Clock className="w-4 h-4" />
-                          </div>
-                          <div className="flex-1 text-left">
-                            <div className="flex items-center gap-3">
-                              <h4 className="font-bold text-slate-900 text-[15px]">Efficiently encode images</h4>
-                              <span className="text-[10px] font-bold tracking-wider uppercase bg-slate-100 text-slate-700 px-2 py-0.5 rounded">Medium Severity</span>
-                            </div>
-                            <p className="text-xs text-slate-500 mt-1">Estimated savings: 620ms</p>
-                          </div>
-                        </div>
-                      </AccordionTrigger>
-                      <AccordionContent className="pb-6 pl-11 pr-4">
-                        <p className="text-sm text-slate-600 bg-slate-50 p-4 border border-slate-200 rounded-lg">Serve images in modern formats like WebP or AVIF to consume less cellular data and improve load time.</p>
-                      </AccordionContent>
-                    </AccordionItem>
-
-                    <AccordionItem value="item-3" className="border-none px-4">
-                      <AccordionTrigger className="hover:no-underline py-4">
-                        <div className="flex items-center gap-3 w-full">
-                          <div className="w-8 h-8 rounded-md bg-green-50 text-green-500 flex items-center justify-center shrink-0">
-                            <CheckCircle2 className="w-4 h-4" />
-                          </div>
-                          <div className="flex-1 text-left">
-                            <div className="flex items-center gap-3">
-                              <h4 className="font-bold text-slate-900 text-[15px]">Properly sized images</h4>
-                              <span className="text-[10px] font-bold tracking-wider uppercase text-green-600 bg-transparent px-0 py-0.5 rounded">Resolved</span>
-                            </div>
-                            <p className="text-xs text-slate-500 mt-1">All images match their display dimensions.</p>
-                          </div>
-                        </div>
-                      </AccordionTrigger>
-                      <AccordionContent className="pb-6 pl-11 pr-4">
-                        <p className="text-sm text-slate-600 bg-slate-50 p-4 border border-slate-200 rounded-lg">No improperly sized images were detected during this audit.</p>
-                      </AccordionContent>
-                    </AccordionItem>
-                  </Accordion>
-                </CardContent>
-              </Card>
-            </div>
+          {/* Page URL Display */}
+          <div className="mb-6 p-3 bg-slate-100 rounded-lg flex items-center gap-2">
+            <Globe className="h-4 w-4 text-slate-400" />
+            <span className="text-sm text-slate-600 font-mono truncate">{actPage?.url}</span>
+            <a
+              href={actPage?.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="ml-auto text-blue-600 hover:text-blue-700 text-xs flex items-center shrink-0"
+            >
+              Open <ArrowUpRight className="h-3 w-3 ml-0.5" />
+            </a>
           </div>
+
+          {/* Core Web Vitals Assessment */}
+          <div className="mb-6">
+            <CWVAssessmentCard
+              assessment={actCWVAssessment}
+              pageLabel={actPage?.pageLabel || ''}
+              device={workspaceDevice}
+              source={actSourceUsed}
+              fallbackTriggered={actFallbackTriggered}
+              fallbackReason={actFallbackReason}
+            />
+          </div>
+
+          {/* Category Scores */}
+          <div className="mb-6">
+            <CategoryScoreCards
+              scores={actCategoryScores}
+              device={workspaceDevice}
+              onCategoryClick={(cat) => setWorkspaceCategory(cat as CategoryName)}
+              activeCategory={workspaceCategory}
+              baselineScores={baselineCategoryScores}
+            />
+          </div>
+
+          {/* Category Tabs for Diagnostics */}
+          <Tabs value={workspaceCategory} onValueChange={(v) => setWorkspaceCategory(v as CategoryName)}>
+            <TabsList className="w-full justify-start mb-4 bg-white border border-slate-200 p-1 rounded-lg">
+              <TabsTrigger value="performance" className="flex-1 data-[state=active]:bg-slate-900 data-[state=active]:text-white">
+                <Zap className="h-3.5 w-3.5 mr-1.5" /> Performance
+              </TabsTrigger>
+              <TabsTrigger value="accessibility" className="flex-1 data-[state=active]:bg-slate-900 data-[state=active]:text-white">
+                <ShieldCheck className="h-3.5 w-3.5 mr-1.5" /> Accessibility
+              </TabsTrigger>
+              <TabsTrigger value="best-practices" className="flex-1 data-[state=active]:bg-slate-900 data-[state=active]:text-white">
+                <CheckCircle2 className="h-3.5 w-3.5 mr-1.5" /> Best Practices
+              </TabsTrigger>
+              <TabsTrigger value="seo" className="flex-1 data-[state=active]:bg-slate-900 data-[state=active]:text-white">
+                <Search className="h-3.5 w-3.5 mr-1.5" /> SEO
+              </TabsTrigger>
+            </TabsList>
+
+            <TabsContent value="performance" className="mt-0">
+              <DiagnosticsPanel
+                diagnostics={diagnostics}
+                category="performance"
+                device={workspaceDevice}
+                pageLabel={actPage?.pageLabel || ''}
+                pageId={actPage?.pageId || ''}
+              />
+            </TabsContent>
+
+            <TabsContent value="accessibility" className="mt-0">
+              <DiagnosticsPanel
+                diagnostics={diagnostics}
+                category="accessibility"
+                device={workspaceDevice}
+                pageLabel={actPage?.pageLabel || ''}
+                pageId={actPage?.pageId || ''}
+              />
+            </TabsContent>
+
+            <TabsContent value="best-practices" className="mt-0">
+              <DiagnosticsPanel
+                diagnostics={diagnostics}
+                category="best-practices"
+                device={workspaceDevice}
+                pageLabel={actPage?.pageLabel || ''}
+                pageId={actPage?.pageId || ''}
+              />
+            </TabsContent>
+
+            <TabsContent value="seo" className="mt-0">
+              <DiagnosticsPanel
+                diagnostics={diagnostics}
+                category="seo"
+                device={workspaceDevice}
+                pageLabel={actPage?.pageLabel || ''}
+                pageId={actPage?.pageId || ''}
+              />
+            </TabsContent>
+          </Tabs>
         </div>
 
         {/* Bottom Audit Metadata */}
@@ -750,7 +960,7 @@ export default function ResultsPage() {
                 <p className="text-slate-700 font-medium font-mono">{run.schemaVersion}</p>
               </div>
               <div>
-                <p className="text-slate-400 text-xs uppercase tracking-wider font-semibold mb-1">Generated Timstamp</p>
+                <p className="text-slate-400 text-xs uppercase tracking-wider font-semibold mb-1">Generated Timestamp</p>
                 <p className="text-slate-700 font-medium">{formatDate(run.generatedAt)}</p>
               </div>
               <div>
@@ -758,9 +968,46 @@ export default function ResultsPage() {
                 <p className="text-slate-700 font-medium font-mono bg-white px-2 py-0.5 rounded text-xs w-max border border-slate-200">{run.deploymentTag || 'N/A'}</p>
               </div>
             </div>
+
+            {/* Category Scores Summary */}
+            {categoryScores.length > 0 && (
+              <div className="mt-6 pt-6 border-t border-slate-200">
+                <p className="text-slate-400 text-xs uppercase tracking-wider font-semibold mb-3">Category Scores Collected</p>
+                <div className="flex flex-wrap gap-2">
+                  {['performance', 'accessibility', 'best-practices', 'seo'].map(cat => {
+                    const catScores = categoryScores.filter(cs => cs.category === cat);
+                    return (
+                      <Badge key={cat} variant="outline" className="bg-white">
+                        {cat}: {catScores.length} scores
+                      </Badge>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* Diagnostics Summary */}
+            {diagnostics.length > 0 && (
+              <div className="mt-4 pt-4 border-t border-slate-200">
+                <p className="text-slate-400 text-xs uppercase tracking-wider font-semibold mb-3">Diagnostic Items Collected</p>
+                <div className="flex flex-wrap gap-2">
+                  <Badge variant="outline" className="bg-white">
+                    Total: {diagnostics.length}
+                  </Badge>
+                  <Badge variant="outline" className="bg-white text-red-600">
+                    Failed: {diagnostics.filter(d => d.status === 'fail').length}
+                  </Badge>
+                  <Badge variant="outline" className="bg-white text-amber-600">
+                    Warnings: {diagnostics.filter(d => d.status === 'warning').length}
+                  </Badge>
+                  <Badge variant="outline" className="bg-white text-green-600">
+                    Passed: {diagnostics.filter(d => d.status === 'pass').length}
+                  </Badge>
+                </div>
+              </div>
+            )}
           </CardContent>
         </Card>
-
       </main>
     </div>
   );
