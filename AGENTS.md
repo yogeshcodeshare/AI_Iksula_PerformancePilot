@@ -304,8 +304,42 @@ npx shadcn add <component-name>
 
 1. **API Key Required**: For reliable data, a PageSpeed API key is required. Without it, rate limits apply.
 2. **Lighthouse Fallback**: Currently simulated (no serverless Chrome)
-3. **Local Storage Limits**: Large audits may hit browser storage limits
+3. **Local Storage Limits**: Large audits (>5MB) exceed localStorage quota — handled by IndexedDB fallback via `saveAuditStateAsync`
 4. **Static Export**: Client-side routing has some limitations in static export mode
+
+## Critical Bug Fixes (March 2026)
+
+### Results Page Not Loading — Root Cause & Fix
+
+**Root Cause**: Three-part race condition between audit completion and results navigation.
+
+**Bug 1 (Critical): Async storage not awaited**
+- `buildAndSaveState()` in `audit/progress/page.tsx` called `saveAuditState()` which fires `dbSet()` (IndexedDB) without `await`
+- "View Results" button appeared before IndexedDB write completed
+- For audits where localStorage quota was exceeded, ONLY IndexedDB was used — but reads on the results page found nothing
+- **Fix**: Changed to `saveAuditStateAsync()` and `await`-ed it. `setSavedRunId()` is only called after save confirms, so the button only appears when data is guaranteed persisted.
+
+**Bug 2 (Critical): No runId in results URL**
+- Progress page navigated to `/results` (no query param)
+- `useAuditState` had no `runId` to look up the specific run; it fell back to generic "current" which could be stale or empty
+- **Fix**: Navigate to `/results?runId=<fullRunId>` so `getAuditStateByRunId()` is used for exact lookup
+
+**Bug 3 (UX): No save-in-progress indicator**
+- User could click "View Results" mid-write (between `setStatus('completed')` and actual storage commit)
+- **Fix**: Added `isSaving` state. Shows "Saving Results..." spinner while IndexedDB write is in progress. Button only becomes a clickable link once `savedRunId` is set.
+
+**Fallback safety net**: `useAuditState` now retries (3×, 600ms apart) if the specific runId is not found — guards against any remaining edge case timing gap.
+
+**Files changed**:
+- `my-app/src/app/audit/progress/page.tsx`
+- `my-app/src/hooks/useAuditState.ts`
+
+### State Management (Updated)
+
+- **Primary**: `saveAuditStateAsync()` → IndexedDB (no 5MB cap, async, awaited before navigation)
+- **Secondary**: `localStorage` (fast sync read, may hit quota on large audits)
+- **Tertiary**: `sessionStorage` (cleared on tab close, used as fast path for fresh navigations)
+- Results page looks up by runId via URL param → deterministic, no stale data risk
 
 ## Deployment
 
@@ -336,6 +370,17 @@ For a client-side only app, localStorage provides persistence without backend co
 
 ### Why Origin-Level Fallback?
 When a specific URL doesn't have enough CrUX data, the origin-level data (entire domain) provides a reasonable fallback while still being real user data.
+
+## my-app vs my-app-final
+
+**`my-app` is the sole source of truth.** `my-app-final` is an outdated partial snapshot from an early development phase.
+
+**Evidence:**
+- `my-app-final/src/services/audit.ts` = 386 lines vs `my-app` = ~1,500 lines (full retry, CWV, diagnostics logic)
+- `my-app-final` has no `db.ts` (no IndexedDB), no `recommendations.ts`, no `/audit/progress` route
+- `my-app-final` has no retry logic, no `MAX_RETRY_ATTEMPTS`, no partial-audit recovery
+
+**Status:** `my-app-final` can be safely archived or deleted. It is not used in the build, has no unique features, and its code is a strict subset of `my-app`.
 
 ## Self-Repair Loop
 

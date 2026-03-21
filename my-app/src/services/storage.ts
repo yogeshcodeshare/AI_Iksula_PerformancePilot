@@ -34,31 +34,29 @@ export interface RecentAudit {
 
 export function saveAuditState(state: AuditState): void {
   if (typeof window === 'undefined') return;
+  if (!state.run) return;
+
+  const runId = state.run.runId;
+  const storageKey = `audit-run-${runId}`;
 
   try {
     const json = JSON.stringify(state);
+    // Continue saving to 'current' for backward compatibility and quick access
     localStorage.setItem(STORAGE_KEY_CURRENT, json);
+    localStorage.setItem('ai-performance-audit-agent-last-run-id', runId);
+    
     addToRecentAudits(state);
 
-    // Also try to save to IndexedDB for safety/large data support
+    // Save to IndexedDB with run-specific key
+    dbSet(storageKey, state).catch(err => console.error('IndexedDB save failed:', err));
+    // Also update 'current' for generic lookups
     dbSet(STORAGE_KEY_CURRENT, state).catch(err => console.error('IndexedDB save failed:', err));
   } catch (error: any) {
     if (error.name === 'QuotaExceededError' || error.message?.includes('quota')) {
-      console.warn('LocalStorage quota exceeded, saving light version and using IndexedDB...');
-
-      // Save light version (no diagnostics details) to localStorage
-      const lightState = {
-        ...state,
-        diagnostics: state.diagnostics.map(d => ({ ...d, details: undefined }))
-      };
-
-      try {
-        localStorage.setItem(STORAGE_KEY_CURRENT, JSON.stringify(lightState));
-      } catch (e) {
-        console.error('Even light state failed in localStorage');
-      }
+      console.warn('LocalStorage quota exceeded, saving full version to IndexedDB...');
 
       // Save full version to IndexedDB (as primary fallback)
+      dbSet(storageKey, state).catch(err => console.error('IndexedDB save failed:', err));
       dbSet(STORAGE_KEY_CURRENT, state).catch(err => console.error('IndexedDB save failed:', err));
       addToRecentAudits(state);
     } else {
@@ -72,12 +70,21 @@ export function saveAuditState(state: AuditState): void {
  */
 export async function saveAuditStateAsync(state: AuditState): Promise<void> {
   if (typeof window === 'undefined') return;
+  if (!state.run) return;
+
+  const runId = state.run.runId;
+  const storageKey = `audit-run-${runId}`;
 
   // Update recent audits list (small metadata)
   addToRecentAudits(state);
 
-  // Save to IndexedDB (no 5MB limit)
+  // Save to IndexedDB (no 5MB limit) with run-specific key
+  await dbSet(storageKey, state);
+  // Also update 'current'
   await dbSet(STORAGE_KEY_CURRENT, state);
+  
+  // Update last run ID
+  localStorage.setItem('ai-performance-audit-agent-last-run-id', runId);
 
   // Try to save light version to localStorage for quick dashboard previews
   try {
@@ -89,6 +96,18 @@ export async function saveAuditStateAsync(state: AuditState): Promise<void> {
   } catch (e) {
     // Silent fail for localStorage
   }
+}
+
+export async function getAuditStateByRunId(runId: string): Promise<AuditState | null> {
+  if (typeof window === 'undefined') return null;
+  const storageKey = `audit-run-${runId}`;
+  const state = await dbGet<AuditState>(storageKey);
+  return state ? normalizeState(state) : null;
+}
+
+export function getLastRunId(): string | null {
+  if (typeof window === 'undefined') return null;
+  return localStorage.getItem('ai-performance-audit-agent-last-run-id');
 }
 
 export function getAuditState(): AuditState | null {
@@ -129,6 +148,7 @@ function normalizeState(state: AuditState): AuditState {
   if (!state.categoryScores) state.categoryScores = [];
   if (!state.diagnostics) state.diagnostics = [];
   if (!state.cwvAssessments) state.cwvAssessments = [];
+  if (!state.pageFailures) state.pageFailures = [];
   return state;
 }
 

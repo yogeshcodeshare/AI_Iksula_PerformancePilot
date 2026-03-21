@@ -1,6 +1,0 @@
-{
-  "version": 3,
-  "sources": [],
-  "sections": [
-    {"offset": {"line": 4, "column": 0}, "map": {"version":3,"sources":["file:///Users/yogeshmohite/AI_Tester_Project/Project8-AI_Performance_Audit_Agent/my-app/src/app/audit/layout.tsx"],"sourcesContent":["export default function AuditLayout({\n  children,\n}: {\n  children: React.ReactNode;\n}) {\n  return children;\n}\n"],"names":[],"mappings":";;;;AAAe,SAAS,YAAY,EAClC,QAAQ,EAGT;IACC,OAAO;AACT"}}]
-}

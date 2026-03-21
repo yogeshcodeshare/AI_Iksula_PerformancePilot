@@ -1,4 +1,6 @@
 // Audit service - PageSpeed first, Lighthouse fallback
+import { saveAuditState, saveAuditStateAsync } from './storage';
+import { getRecommendation } from './recommendations';
 import {
   AuditRun,
   AuditPage,
@@ -16,7 +18,7 @@ import {
   DiagnosticGroup,
   CWVAssessment
 } from '@/types';
-import { generateId, classifyMetric } from '@/lib/utils';
+import { generateId, classifyMetric, formatMetricValue, formatDate } from '@/lib/utils';
 import { THRESHOLDS, SCHEMA_VERSION } from '@/lib/constants';
 
 // PageSpeed Insights API response types
@@ -212,11 +214,22 @@ const SEO_GROUPS: Record<string, DiagnosticGroup> = {
   'font-size': 'manual-checks',
 };
 
+export type PageDeviceStatus = 'pending' | 'running' | 'completed' | 'failed' | 'timeout' | 'retrying';
+
+export interface PageProgressUpdate {
+  pageLabel: string;
+  device: Device;
+  status: PageDeviceStatus;
+  errorCode?: 'timeout' | 'rate-limit' | 'api-error' | 'no-data' | 'network';
+  errorMessage?: string;
+}
+
 export interface AuditProgress {
   total: number;
   completed: number;
   currentPage?: string;
   currentDevice?: Device;
+  pageUpdate?: PageProgressUpdate;
 }
 
 export type ProgressCallback = (progress: AuditProgress) => void;
@@ -224,12 +237,31 @@ export type ProgressCallback = (progress: AuditProgress) => void;
 /**
  * Fetch PageSpeed Insights API data
  */
+// Timeout for PageSpeed API calls — 120 seconds (PSI can be very slow for rich data)
+const PAGESPEED_TIMEOUT_MS = 120_000;
+
+/**
+ * Classify a fetch error into a typed error code for the UI
+ */
+function classifyFetchError(error: unknown): { code: 'timeout' | 'rate-limit' | 'api-error' | 'network'; message: string } {
+  const msg = error instanceof Error ? error.message : String(error);
+  if (error instanceof Error && error.name === 'AbortError') {
+    return { code: 'timeout', message: 'PageSpeed API did not respond within 120 seconds (timeout)' };
+  }
+  if (msg.includes('429') || msg.toLowerCase().includes('quota') || msg.toLowerCase().includes('rate')) {
+    return { code: 'rate-limit', message: 'API rate limit or quota exceeded. Try again in a moment or add an API key.' };
+  }
+  if (msg.includes('Failed to fetch') || msg.includes('NetworkError') || msg.includes('ENOTFOUND')) {
+    return { code: 'network', message: 'Network error: could not reach the PageSpeed API.' };
+  }
+  return { code: 'api-error', message: msg };
+}
+
 async function fetchPageSpeed(url: string, device: Device): Promise<PageSpeedResponse> {
   const apiKey = process.env.NEXT_PUBLIC_PAGESPEED_API_KEY;
   const strategy = device === 'mobile' ? 'mobile' : 'desktop';
 
   // Build API URL - include all categories to get full diagnostic data
-  // category=PERFORMANCE is required, add others for full diagnostics
   let apiUrl = `https://www.googleapis.com/pagespeedonline/v5/runPagespeed?url=${encodeURIComponent(url)}&strategy=${strategy}&category=PERFORMANCE&category=ACCESSIBILITY&category=BEST_PRACTICES&category=SEO`;
 
   if (apiKey) {
@@ -238,29 +270,58 @@ async function fetchPageSpeed(url: string, device: Device): Promise<PageSpeedRes
 
   console.log(`[PageSpeed API] Calling: ${apiUrl.replace(/key=[^&]+/, 'key=***')}`);
 
-  const response = await fetch(apiUrl);
+  // Timeout guard — prevents UI from hanging indefinitely
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), PAGESPEED_TIMEOUT_MS);
+
+  let response: Response;
+  try {
+    response = await fetch(apiUrl, { signal: controller.signal });
+    clearTimeout(timeoutId);
+  } catch (fetchError) {
+    clearTimeout(timeoutId);
+    const classified = classifyFetchError(fetchError);
+    throw Object.assign(new Error(classified.message), { errorCode: classified.code });
+  }
 
   if (!response.ok) {
     const errorData = await response.json().catch(() => ({}));
-    throw new Error(`PageSpeed API error ${response.status}: ${errorData.error?.message || response.statusText}`);
+    const apiMsg = `PageSpeed API error ${response.status}: ${errorData.error?.message || response.statusText}`;
+    throw Object.assign(new Error(apiMsg), { errorCode: response.status === 429 ? 'rate-limit' : 'api-error' });
   }
 
   const data = await response.json();
   console.log(`[PageSpeed API] Response received for ${url} (${device})`);
 
-  // Debug: Log available data sources
   const hasCrux = !!data.loadingExperience?.metrics;
   const hasOriginCrux = !!data.originLoadingExperience?.metrics;
   const hasLighthouse = !!data.lighthouseResult?.audits;
-
   console.log(`[PageSpeed API] Data sources - CrUX: ${hasCrux}, Origin CrUX: ${hasOriginCrux}, Lighthouse: ${hasLighthouse}`);
 
   return data;
 }
 
-// Lighthouse fallback - placeholder for future server-side implementation
-async function runLighthouse(url: string, device: Device): Promise<PageSpeedResponse> {
-  throw new Error('Lighthouse CLI not available');
+/**
+ * Lighthouse CLI fallback.
+ *
+ * STATUS: NOT AVAILABLE in this deployment.
+ * Reason: Lighthouse requires a real Chrome browser process (headless), which is not
+ * available in a static/serverless/browser-only Next.js export.
+ *
+ * What actually happens:
+ *   1. PageSpeed Insights API is called first.
+ *   2. If the PSI response includes Lighthouse lab data (audits.*), we extract it directly.
+ *   3. If the PSI API call itself fails (network, timeout, rate-limit), this function is called.
+ *   4. This function throws immediately.
+ *   5. The outer catch in auditPageDevice sets res.failed = true and returns [] metrics.
+ *   6. The UI shows "Data unavailable" for this page+device combo, truthfully.
+ *
+ * To implement a real fallback: replace the body with a call to a server-side API route
+ * that spawns a Lighthouse CLI process via Node.js child_process, or use a service like
+ * Browserless, Checkly, or a Vercel Serverless Function with Chrome.
+ */
+async function runLighthouse(_url: string, _device: Device): Promise<PageSpeedResponse> {
+  throw new Error('Lighthouse CLI not available in this deployment. Data unavailable.');
 }
 
 /**
@@ -859,6 +920,8 @@ function extractDiagnostics(
         savingsUnit = 'bytes';
       }
 
+      const rec = getRecommendation(auditKey);
+
       diagnostics.push({
         id: generateId(),
         pageId,
@@ -873,8 +936,9 @@ function extractDiagnostics(
         score: audit.score !== null ? Math.round(audit.score * 100) : undefined,
         displayValue: audit.displayValue,
         details: audit.details ? JSON.stringify(audit.details) : undefined,
-        recommendation: undefined, // Will be enriched later if needed
-        whyItMatters: undefined, // Will be enriched later if needed
+        recommendation: rec?.recommendation,
+        whyItMatters: rec?.whyItMatters,
+        suggestedOwner: rec?.suggestedOwner,
         numericValue: audit.numericValue,
         numericUnit: audit.numericUnit,
         savings,
@@ -989,8 +1053,10 @@ function generateCWVAssessment(
   };
 }
 
-// Helper function for formatting metric values
-function formatMetricValue(value: number, metricName: MetricName): string {
+// formatMetricValue is imported from @/lib/utils — no local duplicate needed.
+// The following block is preserved for historical reference but not used:
+// function formatMetricValue(value: number, metricName: MetricName): string {
+function _formatMetricValueLEGACY(value: number, metricName: MetricName): string {
   const threshold = THRESHOLDS[metricName];
   if (!threshold) return String(value);
 
@@ -1008,16 +1074,21 @@ function formatMetricValue(value: number, metricName: MetricName): string {
   return String(Math.round(value));
 }
 
+export interface PageDeviceResult {
+  metrics: MetricResult[];
+  categoryScores: CategoryScore[];
+  diagnostics: DiagnosticItem[];
+  cwvAssessment?: CWVAssessment;
+  failed?: boolean;
+  errorCode?: 'timeout' | 'rate-limit' | 'api-error' | 'network' | 'no-data';
+  errorMessage?: string;
+}
+
 async function auditPageDevice(
   url: string,
   device: Device,
   pageId: string
-): Promise<{
-  metrics: MetricResult[];
-  categoryScores: CategoryScore[];
-  diagnostics: DiagnosticItem[];
-  cwvAssessment: CWVAssessment | null;
-}> {
+): Promise<PageDeviceResult> {
   try {
     // Try PageSpeed first
     const psResult = await fetchPageSpeed(url, device);
@@ -1119,45 +1190,37 @@ async function auditPageDevice(
       const lhErrorMsg = lhError instanceof Error ? lhError.message : 'Unknown error';
       console.log(`[AuditPageDevice] Lighthouse fallback not available: ${lhErrorMsg}`);
 
-      // Capture the original pagespeed error if we have it
+      // Both PageSpeed and Lighthouse failed — return truly empty results.
+      // NEVER return a fake zero-value metric. The UI must handle missing data explicitly.
       const originalErrorMsg = error instanceof Error ? error.message : 'Unknown PageSpeed error';
-
-      // Return empty results with error indicators
+      const errorCode = (error as { errorCode?: string }).errorCode || 'api-error';
       const capturedAt = new Date().toISOString();
+
+      console.warn(`[AuditPageDevice] All sources failed for ${url} (${device}). errorCode=${errorCode}`);
+
       return {
-        metrics: [{
-          pageId,
-          device,
-          metricName: 'LCP',
-          value: 0,
-          unit: 'ms',
-          thresholdGood: THRESHOLDS.LCP.good,
-          thresholdWarn: THRESHOLDS.LCP.warn,
-          status: 'poor',
-          sourceAttempted: 'pagespeed',
-          sourceUsed: 'pagespeed',
-          fallbackTriggered: true,
-          fallbackReason: `API Error: ${originalErrorMsg} (Lighthouse fallback also failed)`,
-          reportUrl: url,
-          capturedAt
-        }],
+        metrics: [], // No fake data — UI will show "unavailable"
         categoryScores: [],
         diagnostics: [],
+        failed: true,
+        errorCode: errorCode as 'timeout' | 'rate-limit' | 'api-error' | 'network' | 'no-data',
+        errorMessage: originalErrorMsg,
         cwvAssessment: {
           pageId,
           device,
           passed: false,
           status: 'not-available',
-          interpretation: `Data could not be retrieved. API Error: ${originalErrorMsg}`,
+          interpretation: `Data could not be retrieved for this page on ${device}. ${originalErrorMsg}`,
           source: 'pagespeed',
           fallbackTriggered: true,
-          fallbackReason: `API Error: ${originalErrorMsg}`,
+          fallbackReason: `Both PageSpeed and Lighthouse failed: ${originalErrorMsg}`,
           capturedAt
         }
       };
     }
   }
 }
+
 
 export interface FullAuditResult {
   run: AuditRun;
@@ -1166,7 +1229,129 @@ export interface FullAuditResult {
   categoryScores: CategoryScore[];
   diagnostics: DiagnosticItem[];
   cwvAssessments: CWVAssessment[];
+  pageFailures: Array<{ pageId: string; pageLabel: string; device: Device; errorCode: string; errorMessage: string }>;
 }
+
+export const MAX_RETRY_ATTEMPTS = 3;
+
+/** Bounded backoff delays (ms) based on retry attempt number (1-indexed): 2s, 4s, 8s */
+function retryDelay(attempt: number): number {
+  return Math.min(2000 * Math.pow(2, attempt - 1), 8000);
+}
+
+/**
+ * Retry only the failed page+device combos from a previous AuditState.
+ * Merges new successful results with the existing successful ones.
+ * Does NOT re-run pages that already have data.
+ */
+export async function retryFailedItems(
+  previousState: import('@/types').AuditState,
+  onProgress?: ProgressCallback
+): Promise<FullAuditResult> {
+  const failures = previousState.pageFailures ?? [];
+  if (failures.length === 0) {
+    // Nothing to retry — return what we have as-is
+    return {
+      run: previousState.run!,
+      pages: previousState.pages,
+      metrics: previousState.metrics,
+      categoryScores: previousState.categoryScores,
+      diagnostics: previousState.diagnostics,
+      cwvAssessments: previousState.cwvAssessments,
+      pageFailures: []
+    };
+  }
+
+  const retryAttempt = (previousState.retryAttempt ?? 0) + 1;
+  console.log(`[retryFailedItems] Attempt ${retryAttempt}/${MAX_RETRY_ATTEMPTS}. Retrying ${failures.length} failed item(s).`);
+
+  // Bounded backoff before retrying
+  const delay = retryDelay(retryAttempt);
+  console.log(`[retryFailedItems] Waiting ${delay}ms before retry...`);
+  await new Promise<void>(resolve => setTimeout(resolve, delay));
+
+  const total = failures.length;
+  let completed = 0;
+
+  // Notify progress start
+  onProgress?.({ total, completed, pageUpdate: undefined });
+
+  // Process failed items strictly sequentially
+  let mergedMetrics = [...previousState.metrics];
+  let mergedCategoryScores = [...previousState.categoryScores];
+  let mergedDiagnostics = [...previousState.diagnostics];
+  let mergedCwvAssessments = [...previousState.cwvAssessments];
+  const remainingFailures: FullAuditResult['pageFailures'] = [];
+
+  for (const failure of failures) {
+    const { pageLabel, pageId, device } = failure;
+    const page = previousState.pages.find(p => p.pageId === pageId);
+    if (!page) continue;
+
+    onProgress?.({
+      total,
+      completed,
+      currentPage: pageLabel,
+      currentDevice: device,
+      pageUpdate: { pageLabel, device, status: 'running' }
+    });
+
+    const res = await auditPageDevice(page.url, device, pageId);
+    completed++;
+
+    onProgress?.({
+      total,
+      completed,
+      currentPage: pageLabel,
+      currentDevice: device,
+      pageUpdate: {
+        pageLabel,
+        device,
+        status: res.failed ? (res.errorCode === 'timeout' ? 'timeout' : 'failed') : 'completed',
+        errorCode: res.errorCode,
+        errorMessage: res.errorMessage
+      }
+    });
+
+    if (res.failed) {
+      remainingFailures.push({
+        pageId,
+        pageLabel,
+        device,
+        errorCode: res.errorCode || 'api-error',
+        errorMessage: res.errorMessage || 'Unknown error'
+      });
+    } else {
+      // Remove old failed/empty entries for this page+device, add new successful results
+      const filterOut = (m: { pageId: string; device: Device }) =>
+        m.pageId !== pageId || m.device !== device;
+
+      mergedMetrics = mergedMetrics.filter(filterOut);
+      mergedCategoryScores = mergedCategoryScores.filter(filterOut);
+      mergedDiagnostics = mergedDiagnostics.filter(filterOut);
+      mergedCwvAssessments = mergedCwvAssessments.filter(filterOut);
+
+      mergedMetrics.push(...res.metrics);
+      mergedCategoryScores.push(...res.categoryScores);
+      mergedDiagnostics.push(...res.diagnostics);
+      if (res.cwvAssessment) mergedCwvAssessments.push(res.cwvAssessment);
+    }
+  }
+
+  return {
+    run: previousState.run!,
+    pages: previousState.pages,
+    metrics: mergedMetrics,
+    categoryScores: mergedCategoryScores,
+    diagnostics: mergedDiagnostics,
+    cwvAssessments: mergedCwvAssessments,
+    pageFailures: remainingFailures
+  };
+}
+
+// Max pages to audit concurrently. Keeps API rate pressure reasonable.
+// Reduced from 2 to 1 to prevent API timeout and rate limiting.
+const PAGE_CONCURRENCY = 1;
 
 export async function runAudit(
   formData: AuditFormData,
@@ -1192,59 +1377,84 @@ export async function runAudit(
     sortOrder: index
   }));
 
-  const metrics: MetricResult[] = [];
-  const categoryScores: CategoryScore[] = [];
-  const diagnostics: DiagnosticItem[] = [];
-  const cwvAssessments: CWVAssessment[] = [];
+  const allMetrics: MetricResult[] = [];
+  const allCategoryScores: CategoryScore[] = [];
+  const allDiagnostics: DiagnosticItem[] = [];
+  const allCwvAssessments: CWVAssessment[] = [];
+  const pageFailures: FullAuditResult['pageFailures'] = [];
 
-  const total = pages.length * 2;
+  const total = pages.length * 2; // mobile + desktop per page
   let completed = 0;
 
-  for (const page of pages) {
-    onProgress?.({
-      total,
-      completed,
-      currentPage: page.pageLabel,
-      currentDevice: 'mobile'
+  // Process pages in concurrent batches
+  for (let i = 0; i < pages.length; i += PAGE_CONCURRENCY) {
+    const batch = pages.slice(i, i + PAGE_CONCURRENCY);
+
+    // Notify: batch starting
+    batch.forEach(page => {
+      onProgress?.({
+        total,
+        completed,
+        currentPage: page.pageLabel,
+        currentDevice: 'mobile',
+        pageUpdate: { pageLabel: page.pageLabel, device: 'mobile', status: 'running' }
+      });
     });
 
-    // Fetch both devices in parallel
-    const [mobileResult, desktopResult] = await Promise.all([
-      auditPageDevice(page.url, 'mobile', page.pageId).then(res => {
-        completed++;
+    // For each page in the batch, run mobile + desktop STRICTLY sequentially.
+    // Running them in parallel on the same URL triggers Google API timeouts & queueing.
+    for (const page of batch) {
+      for (const device of ['mobile', 'desktop'] as Device[]) {
         onProgress?.({
           total,
           completed,
           currentPage: page.pageLabel,
-          currentDevice: 'desktop'
+          currentDevice: device,
+          pageUpdate: { pageLabel: page.pageLabel, device, status: 'running' }
         });
-        return res;
-      }),
-      auditPageDevice(page.url, 'desktop', page.pageId).then(res => {
+
+        const res = await auditPageDevice(page.url, device, page.pageId);
         completed++;
-        return res;
-      })
-    ]);
 
-    // Collect metrics
-    metrics.push(...mobileResult.metrics, ...desktopResult.metrics);
+        onProgress?.({
+          total,
+          completed,
+          currentPage: page.pageLabel,
+          currentDevice: device,
+          pageUpdate: {
+            pageLabel: page.pageLabel,
+            device,
+            status: res.failed ? (res.errorCode === 'timeout' ? 'timeout' : 'failed') : 'completed',
+            errorCode: res.errorCode,
+            errorMessage: res.errorMessage
+          }
+        });
 
-    // Collect category scores
-    categoryScores.push(...mobileResult.categoryScores, ...desktopResult.categoryScores);
+        if (res.failed) {
+          pageFailures.push({
+            pageId: page.pageId,
+            pageLabel: page.pageLabel,
+            device,
+            errorCode: res.errorCode || 'api-error',
+            errorMessage: res.errorMessage || 'Unknown error'
+          });
+        }
 
-    // Collect diagnostics
-    diagnostics.push(...mobileResult.diagnostics, ...desktopResult.diagnostics);
-
-    // Collect CWV assessments
-    if (mobileResult.cwvAssessment) cwvAssessments.push(mobileResult.cwvAssessment);
-    if (desktopResult.cwvAssessment) cwvAssessments.push(desktopResult.cwvAssessment);
-
-    onProgress?.({
-      total,
-      completed,
-      currentPage: page.pageLabel
-    });
+        allMetrics.push(...res.metrics);
+        allCategoryScores.push(...res.categoryScores);
+        allDiagnostics.push(...res.diagnostics);
+        if (res.cwvAssessment) allCwvAssessments.push(res.cwvAssessment);
+      }
+    }
   }
 
-  return { run, pages, metrics, categoryScores, diagnostics, cwvAssessments };
+  return {
+    run,
+    pages,
+    metrics: allMetrics,
+    categoryScores: allCategoryScores,
+    diagnostics: allDiagnostics,
+    cwvAssessments: allCwvAssessments,
+    pageFailures
+  };
 }

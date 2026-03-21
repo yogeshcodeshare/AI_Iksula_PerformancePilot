@@ -28,6 +28,7 @@ export default function RootLayout({
     <html lang="en">
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased min-h-screen bg-slate-50`}
+        suppressHydrationWarning
       >
         <TooltipProvider>
           <div className="flex min-h-screen flex-col">

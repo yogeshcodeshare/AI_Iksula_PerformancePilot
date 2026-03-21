@@ -1,6 +1,0 @@
-{
-  "/audit/page": "app/audit/page.js",
-  "/audit/progress/page": "app/audit/progress/page.js",
-  "/page": "app/page.js",
-  "/results/page": "app/results/page.js"
-}

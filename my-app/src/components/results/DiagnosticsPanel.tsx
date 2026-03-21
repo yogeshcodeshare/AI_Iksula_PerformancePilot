@@ -19,6 +19,7 @@ import {
   DiagnosticStatus
 } from '@/types';
 import {
+  Zap,
   Search,
   CheckCircle2,
   AlertCircle,
@@ -353,13 +354,38 @@ function DiagnosticItemRow({ item }: { item: DiagnosticItem }) {
             </div>
           )}
 
+          {item.recommendation && (
+            <div className="mt-4 p-3 bg-blue-50/50 border border-blue-100/50 rounded-lg">
+              <div className="flex items-center justify-between mb-1.5">
+                <p className="text-[10px] font-black text-blue-900 uppercase tracking-tighter flex items-center gap-1.5">
+                  <Zap className="h-3 w-3" />
+                  Recommended Fix
+                </p>
+                {item.suggestedOwner && (
+                  <Badge variant="secondary" className="h-5 px-1.5 text-[9px] font-black uppercase tracking-tighter bg-blue-100 text-blue-700">
+                    Owner: {item.suggestedOwner}
+                  </Badge>
+                )}
+              </div>
+              <p className="text-xs text-blue-800 font-semibold leading-relaxed">
+                {item.recommendation}
+              </p>
+              {item.whyItMatters && (
+                <p className="text-[10px] text-blue-600/80 mt-1.5 italic">
+                  Why it matters: {item.whyItMatters}
+                </p>
+              )}
+            </div>
+          )}
+
           {item.details && (
-            <div className="mt-2">
-              <details className="text-xs">
-                <summary className="cursor-pointer text-blue-600 hover:text-blue-700 font-medium">
-                  View details
+            <div className="mt-3">
+              <details className="text-xs group">
+                <summary className="cursor-pointer text-slate-400 hover:text-slate-600 font-bold uppercase tracking-widest text-[9px] flex items-center gap-1">
+                  <FileCode className="h-3 w-3" />
+                  View Technical Details
                 </summary>
-                <div className="mt-2 p-2 bg-slate-50 rounded text-slate-600 font-mono text-[10px] overflow-auto max-h-32">
+                <div className="mt-2 p-3 bg-slate-900 text-slate-300 font-mono text-[10px] rounded-lg overflow-auto max-h-48 border border-slate-800 shadow-inner">
                   {item.details}
                 </div>
               </details>

@@ -12,6 +12,13 @@ This project implements a production-ready web application for QA teams to run s
 4. **Origin Fallback**: Added support for origin-level CrUX when URL-level unavailable
 5. **UI Fixes**: Fixed button styling, improved device tab clarity with icons
 6. **Display Format**: Values > 1000ms now show as `1.7 s` (matching Google Web UI)
+7. **Results Page Sync Fix** (Critical — March 21 2026):
+   - **Root cause**: `buildAndSaveState()` fired IndexedDB write async without awaiting. "View Results" appeared before data was persisted. For large audits exceeding localStorage quota, results page found nothing in storage.
+   - **Fix A**: Replaced `saveAuditState()` with `await saveAuditStateAsync()` — IndexedDB write now fully completes before the button activates.
+   - **Fix B**: "View Results" link now navigates to `/results?runId=<fullRunId>` so `useAuditState` performs a deterministic lookup by run ID, not a generic "current" fallback.
+   - **Fix C**: Added `isSaving` state + "Saving Results..." spinner — button is disabled while storage is committing; only becomes a link once `savedRunId` is confirmed.
+   - **Fix D**: `useAuditState` retries up to 3× (600ms each) if runId lookup finds nothing — safety net for any timing edge case.
+   - **Files**: `src/app/audit/progress/page.tsx`, `src/hooks/useAuditState.ts`
 
 ## Files Analyzed
 1. **Converse Australia Performance score.xlsx** - Sample audit data showing manual workflow

@@ -1,20 +1,19 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
-import { ScrollArea } from '@/components/ui/scroll-area';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { RecentAudit } from '@/services/storage';
 import { getRecentAudits, importReportPackage } from '@/services/storage';
-import { formatDate, calculateOverallHealth } from '@/lib/utils';
-import { FileText, Plus, Upload, Activity, TrendingUp, AlertCircle, ArrowRight } from 'lucide-react';
+import { formatDate } from '@/lib/utils';
+import { FileText, Plus, Upload, Activity, TrendingUp, AlertCircle, Search } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 
 export default function Dashboard() {
   const [recentAudits, setRecentAudits] = useState<RecentAudit[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [searchQuery, setSearchQuery] = useState('');
   const router = useRouter();
 
   useEffect(() => {
@@ -43,15 +42,22 @@ export default function Dashboard() {
     reader.readAsText(file);
   };
 
-  const getQuickStats = () => {
-    if (recentAudits.length === 0) return null;
-
-    const totalPages = recentAudits.reduce((sum, a) => sum + (a.pageCount || 0), 0);
-
-    return { totalPages, totalAudits: recentAudits.length };
+  const handleViewResults = async (targetRunId: string) => {
+    router.push(`/results?runId=${targetRunId}`);
   };
 
-  const stats = getQuickStats();
+  const filteredAudits = searchQuery.trim()
+    ? recentAudits.filter(a =>
+        a.projectName.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        a.auditLabel.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        a.runId.toLowerCase().includes(searchQuery.toLowerCase())
+      )
+    : recentAudits;
+
+  const stats = recentAudits.length > 0 ? {
+    totalPages: recentAudits.reduce((sum, a) => sum + (a.pageCount || 0), 0),
+    totalAudits: recentAudits.length
+  } : null;
 
   return (
     <div className="bg-slate-50 min-h-[calc(100vh-4rem)]">
@@ -61,18 +67,17 @@ export default function Dashboard() {
             <h1 className="text-3xl font-bold text-slate-900 tracking-tight">Performance Overview</h1>
             <p className="text-slate-500 mt-1">Monitor and manage your website performance audits.</p>
           </div>
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-3">
             <div className="relative">
               <input
                 type="text"
                 placeholder="Search audits..."
-                className="pl-10 pr-4 py-2 border rounded-md text-sm border-slate-200 focus:outline-none focus:ring-2 focus:ring-slate-800"
+                value={searchQuery}
+                onChange={e => setSearchQuery(e.target.value)}
+                className="pl-10 pr-4 py-2 border rounded-md text-sm border-slate-200 focus:outline-none focus:ring-2 focus:ring-slate-800 w-56"
               />
-              <svg className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-              </svg>
+              <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
             </div>
-            <Button variant="outline" className="text-slate-700 bg-white">Export Data</Button>
           </div>
         </div>
         {/* Quick Stats */}
@@ -178,24 +183,19 @@ export default function Dashboard() {
         <Card className="rounded-xl shadow-sm border-slate-200">
           <div className="flex items-center justify-between p-6 border-b border-slate-100">
             <h2 className="text-lg font-bold text-slate-900">Recent Audit Activity</h2>
-            <div className="flex items-center gap-2">
-              <Button
-                variant="ghost"
-                size="sm"
-                className="text-xs text-red-500 hover:text-red-700 hover:bg-red-50"
-                onClick={() => {
-                  if (confirm('Clear all recent audit activity?')) {
-                    localStorage.removeItem('ai-performance-audit-agent-recent-audits');
-                    setRecentAudits([]);
-                  }
-                }}
-              >
-                Clear All
-              </Button>
-              <Button variant="ghost" className="text-sm text-slate-500 hover:text-slate-900">
-                View All Activity <ArrowRight className="ml-1 h-4 w-4" />
-              </Button>
-            </div>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="text-xs text-red-500 hover:text-red-700 hover:bg-red-50"
+              onClick={() => {
+                if (confirm('Clear all recent audit activity?')) {
+                  localStorage.removeItem('ai-performance-audit-agent-recent-audits');
+                  setRecentAudits([]);
+                }
+              }}
+            >
+              Clear All
+            </Button>
           </div>
           <CardContent className="p-0">
             {isLoading ? (
@@ -219,12 +219,12 @@ export default function Dashboard() {
                     </tr>
                   </thead>
                   <tbody>
-                    {recentAudits.map((audit, index) => (
+                    {filteredAudits.map((audit, index) => (
                       <tr key={`audit-${index}-${audit.runId || 'unknown'}`} className="border-b border-slate-100 last:border-0 hover:bg-slate-50/50 transition-colors">
                         <td className="px-6 py-4">
                           <p className="font-semibold text-slate-900">{audit.projectName || 'Unnamed Audit'}</p>
                           <p className="text-xs text-slate-400 font-mono mt-0.5">
-                            ID: {audit.runId ? audit.runId.substring(0, 8).toUpperCase() : 'N/A'}
+                            {audit.auditLabel ? `${audit.auditLabel} · ` : ''}ID: {audit.runId ? audit.runId.substring(0, 8).toUpperCase() : 'N/A'}
                           </p>
                         </td>
                         <td className="px-6 py-4">
@@ -242,15 +242,25 @@ export default function Dashboard() {
                           {audit.generatedAt ? formatDate(audit.generatedAt) : 'N/A'}
                         </td>
                         <td className="px-6 py-4 text-right">
-                          <Link href="/results">
-                            <Button variant="ghost" size="sm" className="text-slate-600 hover:text-slate-900 hover:bg-slate-100">
-                              <FileText className="h-4 w-4 mr-2" />
-                              View Results
-                            </Button>
-                          </Link>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="text-slate-600 hover:text-slate-900 hover:bg-slate-100"
+                            onClick={() => handleViewResults(audit.runId)}
+                          >
+                            <FileText className="h-4 w-4 mr-2" />
+                            View Results
+                          </Button>
                         </td>
                       </tr>
                     ))}
+                    {filteredAudits.length === 0 && searchQuery && (
+                      <tr>
+                        <td colSpan={5} className="px-6 py-8 text-center text-slate-400">
+                          No audits matching &ldquo;{searchQuery}&rdquo;
+                        </td>
+                      </tr>
+                    )}
                   </tbody>
                 </table>
               </div>
@@ -261,19 +271,12 @@ export default function Dashboard() {
 
       {/* Footer */}
       <footer className="border-t border-slate-200 py-6 mt-12 bg-white">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col md:flex-row justify-between items-center gap-4 text-sm text-slate-500">
-          <div className="flex items-center gap-4">
-            <span>&copy; 2026 PerformancePilot. All rights reserved.</span>
-            <span className="flex items-center text-emerald-600 font-medium">
-              <span className="w-2 h-2 rounded-full bg-emerald-500 mr-2"></span>
-              System Status: Optimal
-            </span>
-          </div>
-          <div className="flex gap-6">
-            <Link href="#" className="hover:text-slate-900">Docs</Link>
-            <Link href="#" className="hover:text-slate-900">Privacy</Link>
-            <Link href="#" className="hover:text-slate-900">Terms</Link>
-          </div>
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex items-center justify-between text-sm text-slate-400">
+          <span>&copy; {new Date().getFullYear()} PerformancePilot &mdash; AI Performance Audit Agent</span>
+          <span className="flex items-center gap-1.5 text-emerald-600 font-medium">
+            <span className="w-2 h-2 rounded-full bg-emerald-500 inline-block"></span>
+            PageSpeed Insights v5
+          </span>
         </div>
       </footer>
     </div>

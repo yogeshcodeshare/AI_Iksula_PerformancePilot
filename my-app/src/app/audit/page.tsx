@@ -5,11 +5,9 @@ import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
-import { Badge } from '@/components/ui/badge';
-import { ScrollArea } from '@/components/ui/scroll-area';
 import { PageFormData, PageType } from '@/types';
 import { PAGE_TYPES, ENVIRONMENTS } from '@/lib/constants';
 import { Plus, Trash2, ArrowLeft, Play, AlertCircle, Upload } from 'lucide-react';
@@ -336,12 +334,9 @@ export default function NewAudit() {
       <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 p-4 z-40 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)]">
         <div className="max-w-4xl mx-auto flex items-center justify-between">
           <div className="flex items-center gap-2 text-sm text-slate-500">
-            <div className="flex -space-x-2">
-              <div className="w-8 h-8 rounded-full bg-slate-300 border-2 border-white"></div>
-              <div className="w-8 h-8 rounded-full bg-slate-400 border-2 border-white"></div>
-              <div className="w-8 h-8 rounded-full bg-slate-200 border-2 border-white"></div>
-            </div>
-            <span className="ml-3 hidden sm:inline">3 collaborators active in this session</span>
+            <span className="hidden sm:inline font-medium">
+              {pages.length} page{pages.length !== 1 ? 's' : ''} configured &mdash; {pages.length * 2} audits queued (mobile + desktop)
+            </span>
           </div>
 
           <div className="flex gap-4">

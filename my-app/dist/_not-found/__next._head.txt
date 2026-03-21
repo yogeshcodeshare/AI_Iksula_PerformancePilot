@@ -1,5 +1,0 @@
-1:"$Sreact.fragment"
-2:I[91930,["/_next/static/chunks/84b19f7daa38dfe5.js","/_next/static/chunks/b9aa33b392c4cfae.js","/_next/static/chunks/61c2c3d8c1948748.js","/_next/static/chunks/db04e9e46993c619.js"],"ViewportBoundary"]
-3:I[91930,["/_next/static/chunks/84b19f7daa38dfe5.js","/_next/static/chunks/b9aa33b392c4cfae.js","/_next/static/chunks/61c2c3d8c1948748.js","/_next/static/chunks/db04e9e46993c619.js"],"MetadataBoundary"]
-4:"$Sreact.suspense"
-0:{"buildId":"dy6CVmxn6YUHq6gfmGdP3","rsc":["$","$1","h",{"children":[["$","meta",null,{"name":"robots","content":"noindex"}],["$","$L2",null,{"children":[["$","meta","0",{"charSet":"utf-8"}],["$","meta","1",{"name":"viewport","content":"width=device-width, initial-scale=1"}]]}],["$","div",null,{"hidden":true,"children":["$","$L3",null,{"children":["$","$4",null,{"name":"Next.Metadata","children":[["$","title","0",{"children":"AI Performance Audit Agent"}],["$","meta","1",{"name":"description","content":"Automated website performance auditing with PageSpeed Insights and Lighthouse"}]]}]}]}],["$","meta",null,{"name":"next-size-adjust","content":""}]]}],"loading":null,"isPartial":false}

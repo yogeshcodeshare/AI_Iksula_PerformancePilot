@@ -104,6 +104,7 @@ export interface DiagnosticItem {
   details?: string; // extended details/snippet
   recommendation?: string; // suggested fix
   whyItMatters?: string; // explanation of importance
+  suggestedOwner?: 'frontend' | 'backend' | 'design' | 'devops' | 'content';
   numericValue?: number; // raw numeric value
   numericUnit?: string; // unit for numeric value
   savings?: number; // potential savings in ms or bytes
@@ -211,15 +212,25 @@ export interface AuditState {
   run: AuditRun | null;
   pages: AuditPage[];
   metrics: MetricResult[];
-  categoryScores: CategoryScore[]; // NEW
-  diagnostics: DiagnosticItem[]; // NEW
-  cwvAssessments: CWVAssessment[]; // NEW
+  categoryScores: CategoryScore[];
+  diagnostics: DiagnosticItem[];
+  cwvAssessments: CWVAssessment[];
   status: 'idle' | 'running' | 'completed' | 'failed' | 'partial';
   progress: {
     total: number;
     completed: number;
     currentPage?: string;
   };
+  /** Tracks which page+device combos failed so the retry logic knows exactly what to re-run */
+  pageFailures?: Array<{
+    pageId: string;
+    pageLabel: string;
+    device: Device;
+    errorCode: string;
+    errorMessage: string;
+  }>;
+  /** Number of retry attempts so far */
+  retryAttempt?: number;
 }
 
 export interface PageFormData {
