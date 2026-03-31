@@ -2,12 +2,9 @@
 
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
-import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { RecentAudit } from '@/services/storage';
-import { getRecentAudits, importReportPackage } from '@/services/storage';
-import { formatDate } from '@/lib/utils';
-import { FileText, Plus, Upload, Activity, TrendingUp, AlertCircle, Search } from 'lucide-react';
+import { getRecentAudits, importReportPackage, saveBaselineReportAsync, getAuditStateByRunId } from '@/services/storage';
+import { formatDate, calculateOverallHealth } from '@/lib/utils';
 import { useRouter } from 'next/navigation';
 
 export default function Dashboard() {
@@ -20,6 +17,22 @@ export default function Dashboard() {
     const audits = getRecentAudits();
     setRecentAudits(audits);
     setIsLoading(false);
+
+    // Recalculate health from IndexedDB to fix stale cached values
+    (async () => {
+      const updated = await Promise.all(
+        audits.map(async (audit) => {
+          try {
+            const state = await getAuditStateByRunId(audit.runId);
+            if (state?.metrics && state.metrics.length > 0) {
+              return { ...audit, overallHealth: calculateOverallHealth(state.metrics) };
+            }
+          } catch { /* keep cached value */ }
+          return audit;
+        })
+      );
+      setRecentAudits(updated);
+    })();
   }, []);
 
   const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -27,14 +40,17 @@ export default function Dashboard() {
     if (!file) return;
 
     const reader = new FileReader();
-    reader.onload = (e) => {
+    reader.onload = async (e) => {
       const content = e.target?.result as string;
       const reportPackage = importReportPackage(content);
 
       if (reportPackage) {
-        // Store in session storage for comparison page
-        sessionStorage.setItem('uploaded-baseline', JSON.stringify(reportPackage));
-        router.push('/compare');
+        try {
+          await saveBaselineReportAsync(reportPackage);
+          router.push('/compare');
+        } catch {
+          alert('Failed to save baseline report. The file may be too large.');
+        }
       } else {
         alert('Invalid report file. Please upload a valid JSON report package.');
       }
@@ -54,231 +70,240 @@ export default function Dashboard() {
       )
     : recentAudits;
 
-  const stats = recentAudits.length > 0 ? {
+  const stats = {
+    totalAudits: recentAudits.length,
     totalPages: recentAudits.reduce((sum, a) => sum + (a.pageCount || 0), 0),
-    totalAudits: recentAudits.length
-  } : null;
+    avgHealth: recentAudits.length > 0
+      ? Math.round(recentAudits.reduce((sum, a) => sum + (a.overallHealth || 0), 0) / recentAudits.length)
+      : 0
+  };
 
   return (
-    <div className="bg-slate-50 min-h-[calc(100vh-4rem)]">
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <div className="flex justify-between items-center mb-8">
+    <div className="bg-background min-h-[calc(100vh-4rem)]">
+      <main className="max-w-7xl mx-auto px-6 py-10">
+
+        {/* Header */}
+        <div className="flex items-start justify-between mb-10">
           <div>
-            <h1 className="text-3xl font-bold text-slate-900 tracking-tight">Performance Overview</h1>
-            <p className="text-slate-500 mt-1">Monitor and manage your website performance audits.</p>
+            <h1 className="text-[34px] font-bold text-foreground tracking-[-0.03em] leading-tight">Performance Audits</h1>
+            <p className="text-muted-foreground mt-1.5 text-base">Monitor and optimize your web performance metrics.</p>
           </div>
-          <div className="flex items-center gap-3">
-            <div className="relative">
-              <input
-                type="text"
-                placeholder="Search audits..."
-                value={searchQuery}
-                onChange={e => setSearchQuery(e.target.value)}
-                className="pl-10 pr-4 py-2 border rounded-md text-sm border-slate-200 focus:outline-none focus:ring-2 focus:ring-slate-800 w-56"
-              />
-              <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
+          <Link href="/audit">
+            <button className="inline-flex items-center gap-2 bg-primary text-primary-foreground px-5 py-2.5 rounded-[10px] text-[15px] font-medium hover:opacity-85 active:scale-[0.98] transition-all cursor-pointer border-none">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+              New Audit
+            </button>
+          </Link>
+        </div>
+
+        {/* Stats Cards — Double Bezel */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-5 mb-10">
+          {/* Total Audits */}
+          <div className="double-bezel">
+            <div className="double-bezel-inner">
+              <div className="flex items-center justify-between mb-4">
+                <span className="text-muted-foreground text-[12px] font-semibold uppercase tracking-[0.1em]">Total Audits</span>
+                <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ background: 'var(--blue-bg)' }}>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--blue-text)" strokeWidth={1.5}><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/></svg>
+                </div>
+              </div>
+              <div className="count-up font-mono text-[40px] font-bold text-foreground tracking-[-0.03em]">{stats.totalAudits}</div>
+              <div className="mt-3 h-1.5 bg-background rounded-full overflow-hidden">
+                <div className="h-full rounded-full opacity-30" style={{ width: '60%', background: 'var(--blue-text)' }} />
+              </div>
+              <p className="text-[12px] mt-2" style={{ color: 'var(--ring)' }}>
+                {recentAudits.length > 0 ? `${Math.min(recentAudits.length, 3)} this month` : 'No audits yet'}
+              </p>
+            </div>
+          </div>
+
+          {/* Avg Health Score */}
+          <div className="double-bezel">
+            <div className="double-bezel-inner">
+              <div className="flex items-center justify-between mb-4">
+                <span className="text-muted-foreground text-[12px] font-semibold uppercase tracking-[0.1em]">Avg Health Score</span>
+                <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ background: 'var(--green-bg)' }}>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--green-text)" strokeWidth={1.5}><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+                </div>
+              </div>
+              <div className="count-up font-mono text-[40px] font-bold tracking-[-0.03em]" style={{ color: 'var(--green-text)' }}>{stats.avgHealth}%</div>
+              <div className="mt-3 h-1.5 bg-background rounded-full overflow-hidden">
+                <div className="h-full rounded-full" style={{ width: `${stats.avgHealth}%`, background: 'var(--green-bar)' }} />
+              </div>
+              <p className="text-[12px] mt-2" style={{ color: 'var(--ring)' }}>
+                {recentAudits.length > 0 ? 'Across all audits' : 'No data yet'}
+              </p>
+            </div>
+          </div>
+
+          {/* Pages Tested */}
+          <div className="double-bezel">
+            <div className="double-bezel-inner">
+              <div className="flex items-center justify-between mb-4">
+                <span className="text-muted-foreground text-[12px] font-semibold uppercase tracking-[0.1em]">Pages Tested</span>
+                <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ background: 'var(--amber-bg)' }}>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--amber-text)" strokeWidth={1.5}><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+                </div>
+              </div>
+              <div className="count-up font-mono text-[40px] font-bold text-foreground tracking-[-0.03em]">{stats.totalPages}</div>
+              <div className="mt-3 h-1.5 bg-background rounded-full overflow-hidden">
+                <div className="h-full rounded-full" style={{ width: `${Math.min(stats.totalPages * 2, 100)}%`, background: 'var(--amber-bar)' }} />
+              </div>
+              <p className="text-[12px] mt-2" style={{ color: 'var(--ring)' }}>
+                Across {stats.totalAudits} audit{stats.totalAudits !== 1 ? 's' : ''}
+              </p>
             </div>
           </div>
         </div>
-        {/* Quick Stats */}
-        {stats && (
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-            <Card className="rounded-xl shadow-sm border-slate-200">
-              <CardContent className="pt-6">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-xs font-semibold tracking-wider text-slate-500 uppercase mb-2">Total Audits</p>
-                    <p className="text-4xl font-bold text-slate-900">{stats.totalAudits.toLocaleString()}</p>
-                  </div>
-                  <div className="h-12 w-12 bg-slate-50 rounded-full flex items-center justify-center border border-slate-100">
-                    <FileText className="h-6 w-6 text-slate-400" />
-                  </div>
+
+        {/* Action Cards */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-5 mb-12">
+          <Link href="/audit" className="no-underline">
+            <div className="bg-card border border-border rounded-2xl p-6 shadow-[var(--shadow-sm)] cursor-pointer transition-all duration-300 hover:-translate-y-0.5 hover:shadow-[var(--shadow-md)]">
+              <div className="flex items-start gap-4">
+                <div className="w-10 h-10 rounded-xl bg-primary flex items-center justify-center flex-shrink-0">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--primary-foreground)" strokeWidth={1.5}><circle cx="12" cy="12" r="10"/><path d="m8 12 3 3 5-6"/></svg>
                 </div>
-              </CardContent>
-            </Card>
-            <Card className="rounded-xl shadow-sm border-slate-200">
-              <CardContent className="pt-6">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-xs font-semibold tracking-wider text-slate-500 uppercase mb-2">Pages Audited</p>
-                    <p className="text-4xl font-bold text-slate-900">{stats.totalPages.toLocaleString()}</p>
-                  </div>
-                  <div className="h-12 w-12 bg-slate-50 rounded-full flex items-center justify-center border border-slate-100">
-                    <Activity className="h-6 w-6 text-slate-400" />
-                  </div>
+                <div className="flex-1">
+                  <h3 className="text-base font-semibold text-foreground">Start New Audit</h3>
+                  <p className="text-muted-foreground text-sm mt-1 leading-relaxed">Configure target URLs and run a fresh performance analysis with PageSpeed Insights.</p>
+                  <span className="inline-flex items-center gap-1.5 text-foreground text-sm font-medium mt-3">
+                    Configure Audit <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+                  </span>
                 </div>
-              </CardContent>
-            </Card>
-            <Card className="rounded-xl shadow-sm border-slate-200">
-              <CardContent className="pt-6">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-xs font-semibold tracking-wider text-slate-500 uppercase mb-2">Avg Health</p>
-                    <p className="text-4xl font-bold text-slate-900">
-                      {Math.round(recentAudits.reduce((sum, a) => sum + (a.overallHealth || 0), 0) / (recentAudits.length || 1))}%
-                    </p>
-                  </div>
-                  <div className="h-12 w-12 bg-slate-50 rounded-full flex items-center justify-center border border-slate-100">
-                    <TrendingUp className="h-6 w-6 text-slate-400" />
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
+              </div>
+            </div>
+          </Link>
+
+          <div className="relative bg-card border border-border rounded-2xl p-6 shadow-[var(--shadow-sm)] cursor-pointer transition-all duration-300 hover:-translate-y-0.5 hover:shadow-[var(--shadow-md)]">
+            <input
+              type="file"
+              accept=".json"
+              onChange={handleFileUpload}
+              className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
+            />
+            <div className="flex items-start gap-4">
+              <div className="w-10 h-10 rounded-xl bg-background border border-border flex items-center justify-center flex-shrink-0">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} className="text-muted-foreground"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+              </div>
+              <div className="flex-1">
+                <h3 className="text-base font-semibold text-foreground">Compare Runs</h3>
+                <p className="text-muted-foreground text-sm mt-1 leading-relaxed">Upload a baseline report and compare against a recent audit to track deltas.</p>
+                <span className="inline-flex items-center gap-1.5 text-foreground text-sm font-medium mt-3">
+                  Upload Baseline <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+                </span>
+              </div>
+            </div>
           </div>
-        )}
-
-        {/* Main Actions */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
-          <Card className="rounded-xl shadow-sm border-slate-200">
-            <CardHeader className="pb-4">
-              <div className="w-10 h-10 bg-slate-900 text-white rounded-md flex items-center justify-center mb-2">
-                <Plus className="h-5 w-5" />
-              </div>
-              <CardTitle className="text-lg">New Audit</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <p className="text-sm text-slate-500 mb-8 min-h-[40px]">
-                Configure a multi-page performance run. Supports project parameters, deployment environments, and custom mobile/desktop device profiles.
-              </p>
-              <Link href="/audit" className="block">
-                <Button className="w-full bg-slate-900 hover:bg-slate-800 text-white rounded-md h-12">
-                  <Plus className="h-4 w-4 mr-2" />
-                  Create New Audit
-                </Button>
-              </Link>
-            </CardContent>
-          </Card>
-
-          <Card className="rounded-xl shadow-sm border-slate-200">
-            <CardHeader className="pb-4">
-              <div className="w-10 h-10 bg-slate-100 text-slate-600 rounded-md flex items-center justify-center mb-2">
-                <Upload className="h-5 w-5" />
-              </div>
-              <CardTitle className="text-lg">Compare Runs</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <p className="text-sm text-slate-500 mb-4 min-h-[40px]">
-                Analyze deltas between two specific audit reports. Upload previous JSON reports to identify regressions or performance improvements.
-              </p>
-              <div className="relative border-2 border-dashed border-slate-200 rounded-lg bg-slate-50 hover:bg-slate-100 transition-colors py-8 text-center">
-                <input
-                  type="file"
-                  accept=".json"
-                  onChange={handleFileUpload}
-                  className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-                />
-                <p className="text-sm text-slate-400 mb-4">Drag and drop report.json here</p>
-                <div className="flex justify-center">
-                  <Button variant="outline" className="bg-white pointer-events-none">
-                    <Upload className="h-4 w-4 mr-2" />
-                    Upload Previous Report
-                  </Button>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
         </div>
 
         {/* Recent Audits */}
-        <Card className="rounded-xl shadow-sm border-slate-200">
-          <div className="flex items-center justify-between p-6 border-b border-slate-100">
-            <h2 className="text-lg font-bold text-slate-900">Recent Audit Activity</h2>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="text-xs text-red-500 hover:text-red-700 hover:bg-red-50"
-              onClick={() => {
-                if (confirm('Clear all recent audit activity?')) {
-                  localStorage.removeItem('ai-performance-audit-agent-recent-audits');
-                  setRecentAudits([]);
-                }
-              }}
-            >
-              Clear All
-            </Button>
+        <div>
+          <div className="flex items-center justify-between mb-5">
+            <h2 className="text-[22px] font-bold text-foreground tracking-[-0.02em]">Recent Audits</h2>
+            <div className="flex items-center gap-3">
+              <div className="relative">
+                <svg className="absolute left-2.5 top-1/2 -translate-y-1/2" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} style={{ color: 'var(--ring)' }}><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                <input
+                  type="text"
+                  placeholder="Search audits..."
+                  value={searchQuery}
+                  onChange={e => setSearchQuery(e.target.value)}
+                  className="py-2 pl-8 pr-3 w-[200px] text-sm bg-card border border-border rounded-lg text-foreground outline-none font-[inherit] placeholder:text-muted-foreground focus:ring-1 focus:ring-ring"
+                />
+              </div>
+              {recentAudits.length > 0 && (
+                <button
+                  className="text-xs font-medium px-3 py-1.5 rounded-lg border-none cursor-pointer transition-colors"
+                  style={{ color: 'var(--red-text)', background: 'var(--red-bg)' }}
+                  onClick={() => {
+                    if (confirm('Clear all recent audit activity?')) {
+                      localStorage.removeItem('ai-performance-audit-agent-recent-audits');
+                      setRecentAudits([]);
+                    }
+                  }}
+                >
+                  Clear All
+                </button>
+              )}
+            </div>
           </div>
-          <CardContent className="p-0">
+
+          <div className="bg-card border border-border rounded-2xl overflow-hidden">
             {isLoading ? (
-              <div className="p-8 text-center text-slate-500">Loading...</div>
+              <div className="p-8 text-center text-muted-foreground">Loading...</div>
             ) : recentAudits.length === 0 ? (
               <div className="text-center py-12">
-                <AlertCircle className="h-12 w-12 text-slate-300 mx-auto mb-3" />
-                <p className="text-slate-500 font-medium">No recent audits found</p>
-                <p className="text-sm text-slate-400">Create a new audit to get started</p>
+                <svg className="mx-auto mb-3 text-muted-foreground/40" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1}><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+                <p className="text-foreground font-medium">No recent audits found</p>
+                <p className="text-sm text-muted-foreground">Create a new audit to get started</p>
               </div>
             ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm text-left">
-                  <thead className="text-xs text-slate-500 bg-slate-50 border-b border-slate-100">
-                    <tr>
-                      <th className="px-6 py-4 font-medium">Audit Name</th>
-                      <th className="px-6 py-4 font-medium">Status</th>
-                      <th className="px-6 py-4 font-medium">Page Count</th>
-                      <th className="px-6 py-4 font-medium">Timestamp</th>
-                      <th className="px-6 py-4 font-medium text-right">Action</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {filteredAudits.map((audit, index) => (
-                      <tr key={`audit-${index}-${audit.runId || 'unknown'}`} className="border-b border-slate-100 last:border-0 hover:bg-slate-50/50 transition-colors">
-                        <td className="px-6 py-4">
-                          <p className="font-semibold text-slate-900">{audit.projectName || 'Unnamed Audit'}</p>
-                          <p className="text-xs text-slate-400 font-mono mt-0.5">
-                            {audit.auditLabel ? `${audit.auditLabel} · ` : ''}ID: {audit.runId ? audit.runId.substring(0, 8).toUpperCase() : 'N/A'}
-                          </p>
-                        </td>
-                        <td className="px-6 py-4">
-                          <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold
-                            ${(audit.overallHealth || 0) >= 80 ? 'bg-green-100 text-green-800 border border-green-200' :
-                              (audit.overallHealth || 0) >= 50 ? 'bg-amber-100 text-amber-800 border border-amber-200' :
-                                'bg-red-100 text-red-800 border border-red-200'}`}>
-                            {(audit.overallHealth || 0) >= 80 ? 'Good' : (audit.overallHealth || 0) >= 50 ? 'Fair' : 'Poor'} ({audit.overallHealth || 0}%)
+              <table className="w-full border-collapse text-sm">
+                <thead>
+                  <tr className="border-b border-border">
+                    <th className="text-left px-5 py-3 text-muted-foreground text-[12px] font-semibold uppercase tracking-[0.1em]">Project</th>
+                    <th className="text-left px-5 py-3 text-muted-foreground text-[12px] font-semibold uppercase tracking-[0.1em]">Label</th>
+                    <th className="text-left px-5 py-3 text-muted-foreground text-[12px] font-semibold uppercase tracking-[0.1em]">Health</th>
+                    <th className="text-left px-5 py-3 text-muted-foreground text-[12px] font-semibold uppercase tracking-[0.1em]">Pages</th>
+                    <th className="text-left px-5 py-3 text-muted-foreground text-[12px] font-semibold uppercase tracking-[0.1em]">Date</th>
+                    <th className="text-right px-5 py-3 text-muted-foreground text-[12px] font-semibold uppercase tracking-[0.1em]">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredAudits.map((audit, index) => {
+                    const health = audit.overallHealth || 0;
+                    const colorBg = health >= 80 ? 'var(--green-bg)' : health >= 50 ? 'var(--amber-bg)' : 'var(--red-bg)';
+                    const colorText = health >= 80 ? 'var(--green-text)' : health >= 50 ? 'var(--amber-text)' : 'var(--red-text)';
+                    return (
+                      <tr
+                        key={`audit-${index}-${audit.runId || 'unknown'}`}
+                        className="table-row-hover cursor-pointer border-b border-border/50 last:border-0"
+                        onClick={() => handleViewResults(audit.runId)}
+                      >
+                        <td className="px-5 py-4 font-medium text-foreground">{audit.projectName || 'Unnamed Audit'}</td>
+                        <td className="px-5 py-4 text-foreground/80">{audit.auditLabel || '—'}</td>
+                        <td className="px-5 py-4">
+                          <span className="status-badge" style={{ background: colorBg, color: colorText }}>
+                            <span className="w-1.5 h-1.5 rounded-full" style={{ background: colorText }} />
+                            {health}%
                           </span>
                         </td>
-                        <td className="px-6 py-4 font-medium text-slate-700">
-                          {audit.pageCount || 0}
-                        </td>
-                        <td className="px-6 py-4 text-slate-500">
-                          {audit.generatedAt ? formatDate(audit.generatedAt) : 'N/A'}
-                        </td>
-                        <td className="px-6 py-4 text-right">
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="text-slate-600 hover:text-slate-900 hover:bg-slate-100"
-                            onClick={() => handleViewResults(audit.runId)}
+                        <td className="px-5 py-4 font-mono text-muted-foreground text-xs">{audit.pageCount || 0} pages</td>
+                        <td className="px-5 py-4 text-muted-foreground text-xs">{audit.generatedAt ? formatDate(audit.generatedAt) : 'N/A'}</td>
+                        <td className="px-5 py-4 text-right">
+                          <button
+                            className="p-1.5 rounded-md border border-border bg-transparent text-muted-foreground hover:bg-muted hover:text-foreground transition-colors cursor-pointer"
+                            onClick={(e) => { e.stopPropagation(); handleViewResults(audit.runId); }}
                           >
-                            <FileText className="h-4 w-4 mr-2" />
-                            View Results
-                          </Button>
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5}><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+                          </button>
                         </td>
                       </tr>
-                    ))}
-                    {filteredAudits.length === 0 && searchQuery && (
-                      <tr>
-                        <td colSpan={5} className="px-6 py-8 text-center text-slate-400">
-                          No audits matching &ldquo;{searchQuery}&rdquo;
-                        </td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
-              </div>
+                    );
+                  })}
+                  {filteredAudits.length === 0 && searchQuery && (
+                    <tr>
+                      <td colSpan={6} className="px-5 py-8 text-center text-muted-foreground">
+                        No audits matching &ldquo;{searchQuery}&rdquo;
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
             )}
-          </CardContent>
-        </Card>
-      </main>
+          </div>
+        </div>
 
-      {/* Footer */}
-      <footer className="border-t border-slate-200 py-6 mt-12 bg-white">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex items-center justify-between text-sm text-slate-400">
-          <span>&copy; {new Date().getFullYear()} PerformancePilot &mdash; AI Performance Audit Agent</span>
-          <span className="flex items-center gap-1.5 text-emerald-600 font-medium">
-            <span className="w-2 h-2 rounded-full bg-emerald-500 inline-block"></span>
-            PageSpeed Insights v5
+        {/* Footer */}
+        <div className="mt-12 text-center text-xs flex items-center justify-center gap-2" style={{ color: 'var(--ring)' }}>
+          PerformancePilot v1.0 <span className="text-border">|</span>
+          <span className="flex items-center gap-1.5">
+            <span className="pulse-dot w-1.5 h-1.5 rounded-full bg-emerald-500" />
+            System Healthy
           </span>
         </div>
-      </footer>
+      </main>
     </div>
   );
 }

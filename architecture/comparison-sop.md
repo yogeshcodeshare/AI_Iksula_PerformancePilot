@@ -69,18 +69,39 @@ function compareAudits(baseline: ReportPackage, current: ReportPackage): Compari
 ## Delta Calculation
 
 ```typescript
+// Minimum absolute thresholds to avoid false positives on near-zero values
+function getMinThreshold(metricName: MetricName): number {
+  switch (metricName) {
+    case 'CLS': return 0.01;
+    case 'INP': return 10;
+    case 'LCP': case 'FCP': case 'TTFB': return 50;
+    case 'performance_score': return 1;
+    default: return 0;
+  }
+}
+
 function calculateDelta(baseline: MetricResult, current: MetricResult): ComparisonDelta {
   const deltaValue = current.value - baseline.value;
-  
-  // For all Core Web Vitals, lower is better
-  const deltaDirection = deltaValue < 0 ? 'improved' 
-    : deltaValue > 0 ? 'regressed' 
-    : 'unchanged';
-  
+  let deltaDirection: 'improved' | 'regressed' | 'unchanged';
+
+  if (deltaValue === 0) {
+    deltaDirection = 'unchanged';
+  } else {
+    // Use 10% of baseline OR minimum absolute threshold, whichever is larger
+    const threshold = Math.max(baseline.value * 0.1, getMinThreshold(baseline.metricName));
+    if (Math.abs(deltaValue) < threshold) {
+      deltaDirection = 'unchanged';
+    } else if (deltaValue < 0) {
+      deltaDirection = 'improved';
+    } else {
+      deltaDirection = 'regressed';
+    }
+  }
+
   return {
-    baselineRunId: baseline.runId,
-    currentRunId: current.runId,
-    pageKey: current.pageId,
+    baselineRunId: baseline.pageId,
+    currentRunId: current.pageId,
+    pageKey: pageLabel,
     metricName: current.metricName,
     device: current.device,
     baselineValue: baseline.value,
@@ -95,9 +116,24 @@ function calculateDelta(baseline: MetricResult, current: MetricResult): Comparis
 
 | Category | Criteria |
 |----------|----------|
-| Regression | deltaDirection === 'regressed' AND delta exceeds 10% threshold |
-| Improvement | deltaDirection === 'improved' AND delta exceeds 10% threshold |
-| Unchanged | delta within 10% or exactly equal |
+| Regression | deltaDirection === 'regressed' AND delta exceeds max(10% baseline, min threshold) |
+| Improvement | deltaDirection === 'improved' AND delta exceeds max(10% baseline, min threshold) |
+| Unchanged | delta within threshold, or both values are exactly equal |
+
+### Minimum Absolute Thresholds
+
+These prevent false positives when baseline values are near zero (e.g., CLS 0.00 → 0.00 was previously flagged as "regressed"):
+
+| Metric | Min Threshold | Rationale |
+|--------|--------------|-----------|
+| CLS | 0.01 | Unitless; changes < 0.01 are imperceptible |
+| INP | 10 ms | Sub-10ms changes are within measurement noise |
+| LCP, FCP, TTFB | 50 ms | Sub-50ms changes are within measurement noise |
+| performance_score | 1 point | Single-point changes are insignificant |
+
+## Compared Metrics
+
+Only Core Web Vitals are compared in the Metrics tab: **LCP, INP, CLS, FCP, TTFB**. `performance_score` is excluded as it is represented in the Category Scores tab.
 
 ## Output Requirements
 

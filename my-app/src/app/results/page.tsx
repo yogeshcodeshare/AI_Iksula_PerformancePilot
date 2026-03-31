@@ -6,7 +6,7 @@ import { useAuditState } from '@/hooks/useAuditState';
 import { useResultsFilters } from '@/hooks/useResultsFilters';
 import { useDiagnosticWorkspace } from '@/hooks/useDiagnosticWorkspace';
 import { generateReportPackage, downloadJSON, downloadPDF, downloadPackage } from '@/services/export';
-import { getBaselineReport, clearBaselineReport } from '@/services/storage';
+import { getBaselineReportAsync, clearBaselineReport } from '@/services/storage';
 import { compareReports } from '@/services/comparison';
 import { Activity, AlertCircle, ShieldCheck } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -55,8 +55,9 @@ function ResultsContent() {
   });
 
   useEffect(() => {
-    const baseline = getBaselineReport();
-    if (baseline) setBaselineReport(baseline);
+    getBaselineReportAsync().then(baseline => {
+      if (baseline) setBaselineReport(baseline);
+    });
   }, []);
 
   const comparison = useMemo(() => {
@@ -74,10 +75,10 @@ function ResultsContent() {
 
   if (isLoading) {
     return (
-      <div className="min-h-screen bg-slate-50 flex items-center justify-center">
+      <div className="min-h-screen bg-secondary flex items-center justify-center">
         <div className="text-center">
-          <Activity className="h-12 w-12 text-slate-300 mx-auto mb-3 animate-pulse" />
-          <p className="text-slate-500">Loading audit results...</p>
+          <Activity className="h-12 w-12 text-muted-foreground/50 mx-auto mb-3 animate-pulse" />
+          <p className="text-muted-foreground">Loading audit results...</p>
         </div>
       </div>
     );
@@ -85,11 +86,11 @@ function ResultsContent() {
 
   if (error || !auditState || !auditState.run) {
     return (
-      <div className="min-h-screen bg-slate-50 flex items-center justify-center">
+      <div className="min-h-screen bg-secondary flex items-center justify-center">
         <div className="text-center max-w-md p-6">
           <AlertCircle className="h-12 w-12 text-amber-500 mx-auto mb-3" />
-          <p className="text-slate-700 font-medium mb-2">No audit data found</p>
-          <p className="text-slate-500 text-sm mb-6">
+          <p className="text-foreground font-medium mb-2">No audit data found</p>
+          <p className="text-muted-foreground text-sm mb-6">
             We couldn't find the audit run you were looking for. Please try running a new audit.
           </p>
           <div className="flex gap-2 justify-center">
@@ -117,7 +118,7 @@ function ResultsContent() {
   };
 
   return (
-    <div className="bg-slate-50 min-h-[calc(100vh-4rem)] pb-24">
+    <div className="bg-background min-h-[calc(100vh-4rem)] pb-24">
       <AuditHeader 
         run={auditState.run}
         onDownloadJSON={handleDownloadJSON}
@@ -132,9 +133,10 @@ function ResultsContent() {
       />
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-8">
-        <SummaryCards 
-            metrics={auditState.metrics} 
-            pageCount={auditState.pages.length} 
+        <SummaryCards
+            metrics={auditState.metrics}
+            pageCount={auditState.pages.length}
+            baselineMetrics={baselineReport?.metrics}
         />
 
         <ExecutiveSummaryCard 
@@ -151,7 +153,7 @@ function ResultsContent() {
             pages={auditState.pages} 
         />
 
-        <MetricsMatrix 
+        <MetricsMatrix
             pages={auditState.pages}
             metrics={auditState.metrics}
             searchQuery={searchQuery}
@@ -163,10 +165,10 @@ function ResultsContent() {
             onViewDetails={(id, dev) => {
                 workspace.setWorkspacePage(id);
                 workspace.setWorkspaceDevice(dev);
-                // Scroll to workspace logic here? Or just focus?
                 const el = document.getElementById('diagnostic-workspace');
                 if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
             }}
+            comparison={comparison}
         />
 
         <div id="diagnostic-workspace">
@@ -213,8 +215,8 @@ function ResultsContent() {
 export default function ResultsPage() {
   return (
     <Suspense fallback={
-        <div className="min-h-screen bg-slate-50 flex items-center justify-center">
-            <Activity className="h-12 w-12 text-slate-300 animate-pulse" />
+        <div className="min-h-screen bg-secondary flex items-center justify-center">
+            <Activity className="h-12 w-12 text-muted-foreground/50 animate-pulse" />
         </div>
     }>
       <ResultsContent />

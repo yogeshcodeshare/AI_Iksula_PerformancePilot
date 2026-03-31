@@ -67,11 +67,11 @@ export function ComparisonDialog({ open, onOpenChange, onBaselineLoaded }: Compa
         </DialogHeader>
         <div className="flex flex-col gap-4 py-4">
           <div className="flex items-center justify-center w-full">
-            <label className="flex flex-col items-center justify-center w-full h-32 border-2 border-slate-300 border-dashed rounded-lg cursor-pointer bg-slate-50 hover:bg-slate-100 transition-colors">
+            <label className="flex flex-col items-center justify-center w-full h-32 border-2 border-border border-dashed rounded-lg cursor-pointer bg-secondary hover:bg-muted transition-colors">
               <div className="flex flex-col items-center justify-center pt-5 pb-6">
-                <Upload className="w-8 h-8 mb-3 text-slate-400" />
-                <p className="mb-2 text-sm text-slate-500"><span className="font-semibold">Click to upload</span> or drag and drop</p>
-                <p className="text-xs text-slate-400">JSON Audit Report</p>
+                <Upload className="w-8 h-8 mb-3 text-muted-foreground" />
+                <p className="mb-2 text-sm text-muted-foreground"><span className="font-semibold">Click to upload</span> or drag and drop</p>
+                <p className="text-xs text-muted-foreground">JSON Audit Report</p>
               </div>
               <Input 
                 type="file" 

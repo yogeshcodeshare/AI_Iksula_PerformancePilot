@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>PerformancePilot — Audit Progress</title>
+<link rel="stylesheet" href="shared-styles.css" />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+</head>
+<body style="padding-bottom:80px;">
+  <!-- NAVBAR -->
+  <nav class="sticky-bar" style="top:0;"><div class="navbar">
+    <div style="display:flex;align-items:center;gap:32px;">
+      <a href="1-navbar-dashboard.html" style="display:flex;align-items:center;gap:8px;text-decoration:none;"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="1.5"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg><span class="t-heading" style="font-weight:600;font-size:15px;letter-spacing:-0.02em;">PerformancePilot</span></a>
+      <div style="display:flex;gap:24px;"><a href="#" class="nav-link t-muted" style="font-size:14px;font-weight:500;">Dashboard</a><a href="#" class="nav-link t-muted" style="font-size:14px;font-weight:500;">New Audit</a></div>
+    </div>
+    <div style="display:flex;align-items:center;gap:12px;"><button class="theme-toggle" onclick="toggleTheme()"></button><div style="width:32px;height:32px;border-radius:50%;background:var(--bg);border:2px solid var(--border);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:600;" class="t-muted">YM</div></div>
+  </div></nav>
+
+  <main style="max-width:1024px;margin:0 auto;padding:40px 24px;">
+    <!-- Progress Hero -->
+    <div class="reveal" style="text-align:center;margin-bottom:40px;">
+      <div style="display:flex;align-items:center;justify-content:center;gap:10px;margin-bottom:12px;">
+        <span class="pulse-dot" style="width:10px;height:10px;border-radius:50%;background:var(--blue-text);"></span>
+        <span style="font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:0.1em;color:var(--blue-text);">Running Audit</span>
+      </div>
+      <div class="count-up mono t-heading" style="font-size:48px;font-weight:700;letter-spacing:-0.04em;">67%</div>
+      <p class="t-muted" style="font-size:14px;margin-top:8px;">Analyzing: <strong class="t-body">Homepage</strong> (Desktop viewport)</p>
+      <div style="max-width:480px;margin:24px auto 0;height:8px;background:var(--bg);border-radius:4px;overflow:hidden;border:1px solid var(--border-light);">
+        <div class="progress-anim" style="height:100%;width:67%;background:linear-gradient(90deg, color-mix(in srgb, var(--blue-text) 60%, transparent), var(--blue-text));border-radius:4px;"></div>
+      </div>
+    </div>
+
+    <!-- Stats -->
+    <div class="reveal" style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-bottom:40px;">
+      <div class="double-bezel"><div class="double-bezel-inner" style="text-align:center;padding:16px 24px;">
+        <div style="width:32px;height:32px;border-radius:8px;background:var(--blue-bg);display:flex;align-items:center;justify-content:center;margin:0 auto 8px;"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--blue-text)" stroke-width="1.5"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg></div>
+        <div class="count-up mono t-heading" style="font-size:24px;font-weight:700;">24</div>
+        <div class="t-muted" style="font-size:12px;margin-top:4px;">Metrics Collected</div>
+      </div></div>
+      <div class="double-bezel"><div class="double-bezel-inner" style="text-align:center;padding:16px 24px;">
+        <div style="width:32px;height:32px;border-radius:8px;background:var(--green-bg);display:flex;align-items:center;justify-content:center;margin:0 auto 8px;"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--green-text)" stroke-width="1.5"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg></div>
+        <div class="count-up mono t-heading" style="font-size:24px;font-weight:700;">156</div>
+        <div class="t-muted" style="font-size:12px;margin-top:4px;">Diagnostics Found</div>
+      </div></div>
+      <div class="double-bezel"><div class="double-bezel-inner" style="text-align:center;padding:16px 24px;">
+        <div style="width:32px;height:32px;border-radius:8px;background:var(--amber-bg);display:flex;align-items:center;justify-content:center;margin:0 auto 8px;"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--amber-text)" stroke-width="1.5"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/></svg></div>
+        <div class="count-up mono t-heading" style="font-size:24px;font-weight:700;">4</div>
+        <div class="t-muted" style="font-size:12px;margin-top:4px;">Categories Scored</div>
+      </div></div>
+    </div>
+
+    <!-- Pipeline Table -->
+    <div class="reveal card-static" style="overflow:hidden;margin-bottom:32px;">
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid var(--border-light);">
+        <h2 class="t-heading" style="font-size:15px;font-weight:700;">Audit Pipeline Status</h2>
+        <span class="mono t-muted" style="font-size:11px;background:var(--bg);padding:4px 10px;border-radius:6px;">Run: a1b2c3d4</span>
+      </div>
+      <table style="width:100%;border-collapse:collapse;font-size:13px;">
+        <thead><tr style="border-bottom:1px solid var(--border-light);">
+          <th class="t-muted" style="text-align:left;padding:10px 20px;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.08em;">Page</th>
+          <th class="t-muted" style="text-align:left;padding:10px 20px;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.08em;">URL</th>
+          <th class="t-muted" style="text-align:center;padding:10px 20px;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.08em;">Mobile</th>
+          <th class="t-muted" style="text-align:center;padding:10px 20px;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.08em;">Desktop</th>
+          <th class="t-muted" style="text-align:center;padding:10px 20px;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.08em;">Status</th>
+        </tr></thead>
+        <tbody>
+          <tr class="table-row" style="border-bottom:1px solid var(--border-light);">
+            <td class="t-heading" style="padding:14px 20px;font-weight:500;">Homepage</td>
+            <td class="mono t-muted" style="padding:14px 20px;font-size:12px;">example.com</td>
+            <td style="padding:14px 20px;text-align:center;"><span style="display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:500;color:var(--green-text);"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>Done</span></td>
+            <td style="padding:14px 20px;text-align:center;"><span style="display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:500;color:var(--blue-text);"><svg class="spin" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>Running</span></td>
+            <td style="padding:14px 20px;text-align:center;"><span class="status-badge" style="background:var(--blue-bg);color:var(--blue-text);"><span class="pulse-dot" style="width:6px;height:6px;border-radius:50%;background:var(--blue-text);"></span>In Progress</span></td>
+          </tr>
+          <tr class="table-row" style="border-bottom:1px solid var(--border-light);">
+            <td class="t-heading" style="padding:14px 20px;font-weight:500;">Product Page</td>
+            <td class="mono t-muted" style="padding:14px 20px;font-size:12px;">example.com/product/...</td>
+            <td style="padding:14px 20px;text-align:center;"><span class="t-faint" style="display:inline-flex;align-items:center;gap:6px;font-size:12px;"><span style="width:8px;height:8px;border-radius:50%;background:var(--border);"></span>Queued</span></td>
+            <td style="padding:14px 20px;text-align:center;"><span class="t-faint" style="display:inline-flex;align-items:center;gap:6px;font-size:12px;"><span style="width:8px;height:8px;border-radius:50%;background:var(--border);"></span>Queued</span></td>
+            <td style="padding:14px 20px;text-align:center;"><span class="status-badge t-muted" style="background:var(--bg);">Pending</span></td>
+          </tr>
+          <tr class="table-row">
+            <td class="t-heading" style="padding:14px 20px;font-weight:500;">Electronics</td>
+            <td class="mono t-muted" style="padding:14px 20px;font-size:12px;">example.com/category/...</td>
+            <td style="padding:14px 20px;text-align:center;"><span class="t-faint" style="display:inline-flex;align-items:center;gap:6px;font-size:12px;"><span style="width:8px;height:8px;border-radius:50%;background:var(--border);"></span>Queued</span></td>
+            <td style="padding:14px 20px;text-align:center;"><span class="t-faint" style="display:inline-flex;align-items:center;gap:6px;font-size:12px;"><span style="width:8px;height:8px;border-radius:50%;background:var(--border);"></span>Queued</span></td>
+            <td style="padding:14px 20px;text-align:center;"><span class="status-badge t-muted" style="background:var(--bg);">Pending</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Info Cards -->
+    <div class="reveal" style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+      <div class="card-static" style="padding:20px;">
+        <h3 class="t-muted" style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:12px;">Device Emulation</h3>
+        <div style="display:flex;flex-direction:column;gap:8px;">
+          <div style="display:flex;justify-content:space-between;font-size:13px;"><span class="t-muted">Mobile</span><span class="t-body" style="font-weight:500;">Moto G Power (412 x 823)</span></div>
+          <div style="display:flex;justify-content:space-between;font-size:13px;"><span class="t-muted">Desktop</span><span class="t-body" style="font-weight:500;">Full HD (1920 x 1080)</span></div>
+        </div>
+      </div>
+      <div class="card-static" style="padding:20px;">
+        <h3 class="t-muted" style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:12px;">Protocol</h3>
+        <div style="display:flex;flex-direction:column;gap:8px;">
+          <div style="display:flex;justify-content:space-between;font-size:13px;"><span class="t-muted">Method</span><span class="t-body" style="font-weight:500;">B.L.A.S.T. v1.0</span></div>
+          <div style="display:flex;justify-content:space-between;font-size:13px;"><span class="t-muted">Pipeline</span><span class="t-body" style="font-weight:500;">Sequential (1 at a time)</span></div>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <!-- Sticky Bottom -->
+  <div class="sticky-bottom"><div style="max-width:1024px;margin:0 auto;padding:0 24px;display:flex;align-items:center;justify-content:space-between;height:64px;">
+    <div style="display:flex;align-items:center;gap:8px;"><span class="pulse-dot" style="width:8px;height:8px;border-radius:50%;background:var(--blue-text);"></span><span class="t-muted" style="font-size:14px;">Audit in progress &mdash; 2 of 6 tasks completed</span></div>
+    <div style="display:flex;gap:12px;"><button class="btn-ghost">Cancel Audit</button><button class="btn-primary" style="opacity:0.4;cursor:not-allowed;" disabled>View Results <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M5 12h14M12 5l7 7-7 7"/></svg></button></div>
+  </div></div>
+
+  <script>
+    function toggleTheme() { document.documentElement.dataset.theme = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark'; }
+    const obs = new IntersectionObserver(e => e.forEach((en,i) => { if(en.isIntersecting) setTimeout(()=>en.target.classList.add('visible'), i*80) }), {threshold:0.1,rootMargin:'0px 0px -40px 0px'});
+    document.querySelectorAll('.reveal').forEach(el => obs.observe(el));
+  </script>
+</body>
+</html>

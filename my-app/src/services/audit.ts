@@ -237,8 +237,44 @@ export type ProgressCallback = (progress: AuditProgress) => void;
 /**
  * Fetch PageSpeed Insights API data
  */
-// Timeout for PageSpeed API calls — 120 seconds (PSI can be very slow for rich data)
-const PAGESPEED_TIMEOUT_MS = 120_000;
+// Timeout for PageSpeed API calls.
+// First attempt: 90s — enough for most pages including moderately heavy ones.
+// Retry attempts: 120s — gives heavy pages (Amazon PDPs, etc.) extra headroom.
+const PAGESPEED_TIMEOUT_MS = 90_000;
+const PAGESPEED_RETRY_TIMEOUT_MS = 120_000;
+
+// Minimum gap between API calls to avoid burst pressure (ms)
+const MIN_CALL_GAP_MS = 300;
+
+/**
+ * Dynamic concurrency based on page count and API key availability.
+ * Without an API key, rate limit is ~1 req/100s so we must stay sequential.
+ * With a key, we scale up based on audit size.
+ */
+export function getPageConcurrency(pageCount: number): number {
+  const apiKey = process.env.NEXT_PUBLIC_PAGESPEED_API_KEY;
+  if (!apiKey) return 1;
+  if (pageCount <= 8) return 2;
+  if (pageCount <= 15) return 3;
+  if (pageCount <= 25) return 4;
+  return 5; // 26+ pages
+}
+
+/**
+ * Throttled wrapper around fetchPageSpeed — staggers calls by MIN_CALL_GAP_MS
+ * to avoid burst pressure on the Google API.
+ */
+let lastCallTimestamp = 0;
+
+async function throttledFetchPageSpeed(url: string, device: Device, timeoutMs: number = PAGESPEED_TIMEOUT_MS): Promise<PageSpeedResponse> {
+  const now = Date.now();
+  const gap = now - lastCallTimestamp;
+  if (gap < MIN_CALL_GAP_MS) {
+    await new Promise(r => setTimeout(r, MIN_CALL_GAP_MS - gap));
+  }
+  lastCallTimestamp = Date.now();
+  return fetchPageSpeed(url, device, timeoutMs);
+}
 
 /**
  * Classify a fetch error into a typed error code for the UI
@@ -246,7 +282,7 @@ const PAGESPEED_TIMEOUT_MS = 120_000;
 function classifyFetchError(error: unknown): { code: 'timeout' | 'rate-limit' | 'api-error' | 'network'; message: string } {
   const msg = error instanceof Error ? error.message : String(error);
   if (error instanceof Error && error.name === 'AbortError') {
-    return { code: 'timeout', message: 'PageSpeed API did not respond within 120 seconds (timeout)' };
+    return { code: 'timeout', message: 'PageSpeed API did not respond in time (timeout). Retries use a longer timeout.' };
   }
   if (msg.includes('429') || msg.toLowerCase().includes('quota') || msg.toLowerCase().includes('rate')) {
     return { code: 'rate-limit', message: 'API rate limit or quota exceeded. Try again in a moment or add an API key.' };
@@ -257,7 +293,7 @@ function classifyFetchError(error: unknown): { code: 'timeout' | 'rate-limit' | 
   return { code: 'api-error', message: msg };
 }
 
-async function fetchPageSpeed(url: string, device: Device): Promise<PageSpeedResponse> {
+async function fetchPageSpeed(url: string, device: Device, timeoutMs: number = PAGESPEED_TIMEOUT_MS): Promise<PageSpeedResponse> {
   const apiKey = process.env.NEXT_PUBLIC_PAGESPEED_API_KEY;
   const strategy = device === 'mobile' ? 'mobile' : 'desktop';
 
@@ -268,11 +304,11 @@ async function fetchPageSpeed(url: string, device: Device): Promise<PageSpeedRes
     apiUrl += `&key=${apiKey}`;
   }
 
-  console.log(`[PageSpeed API] Calling: ${apiUrl.replace(/key=[^&]+/, 'key=***')}`);
+  console.log(`[PageSpeed API] Calling (timeout: ${timeoutMs / 1000}s): ${apiUrl.replace(/key=[^&]+/, 'key=***')}`);
 
   // Timeout guard — prevents UI from hanging indefinitely
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), PAGESPEED_TIMEOUT_MS);
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
   let response: Response;
   try {
@@ -1087,11 +1123,12 @@ export interface PageDeviceResult {
 async function auditPageDevice(
   url: string,
   device: Device,
-  pageId: string
+  pageId: string,
+  timeoutMs: number = PAGESPEED_TIMEOUT_MS
 ): Promise<PageDeviceResult> {
   try {
-    // Try PageSpeed first
-    const psResult = await fetchPageSpeed(url, device);
+    // Try PageSpeed first (throttled to avoid API burst pressure)
+    const psResult = await throttledFetchPageSpeed(url, device, timeoutMs);
 
     if (isComplete(psResult)) {
       const hasUrlLevelCrux = psResult.loadingExperience?.metrics?.LARGEST_CONTENTFUL_PAINT_MS?.percentile !== undefined;
@@ -1276,65 +1313,101 @@ export async function retryFailedItems(
   // Notify progress start
   onProgress?.({ total, completed, pageUpdate: undefined });
 
-  // Process failed items strictly sequentially
+  // Group failures by pageId for parallel retry (different pages can retry concurrently)
+  const failuresByPage = new Map<string, typeof failures>();
+  for (const failure of failures) {
+    const existing = failuresByPage.get(failure.pageId) || [];
+    existing.push(failure);
+    failuresByPage.set(failure.pageId, existing);
+  }
+
+  const uniquePages = Array.from(failuresByPage.keys());
+  const retryConcurrency = getPageConcurrency(uniquePages.length);
+
   let mergedMetrics = [...previousState.metrics];
   let mergedCategoryScores = [...previousState.categoryScores];
   let mergedDiagnostics = [...previousState.diagnostics];
   let mergedCwvAssessments = [...previousState.cwvAssessments];
   const remainingFailures: FullAuditResult['pageFailures'] = [];
 
-  for (const failure of failures) {
-    const { pageLabel, pageId, device } = failure;
-    const page = previousState.pages.find(p => p.pageId === pageId);
-    if (!page) continue;
+  console.log(`[retryFailedItems] Retrying ${failures.length} items across ${uniquePages.length} pages (concurrency: ${retryConcurrency})`);
 
-    onProgress?.({
-      total,
-      completed,
-      currentPage: pageLabel,
-      currentDevice: device,
-      pageUpdate: { pageLabel, device, status: 'running' }
-    });
+  // Process pages in parallel batches, devices sequentially per page
+  for (let i = 0; i < uniquePages.length; i += retryConcurrency) {
+    const pageBatch = uniquePages.slice(i, i + retryConcurrency);
 
-    const res = await auditPageDevice(page.url, device, pageId);
-    completed++;
+    const batchResults = await Promise.all(
+      pageBatch.map(async (pageId) => {
+        const pageFailures = failuresByPage.get(pageId) || [];
+        const page = previousState.pages.find(p => p.pageId === pageId);
+        const results: { successes: typeof remainingFailures; failures: typeof remainingFailures; metrics: MetricResult[]; categoryScores: CategoryScore[]; diagnostics: DiagnosticItem[]; cwvAssessments: CWVAssessment[] } = {
+          successes: [], failures: [], metrics: [], categoryScores: [], diagnostics: [], cwvAssessments: []
+        };
 
-    onProgress?.({
-      total,
-      completed,
-      currentPage: pageLabel,
-      currentDevice: device,
-      pageUpdate: {
-        pageLabel,
-        device,
-        status: res.failed ? (res.errorCode === 'timeout' ? 'timeout' : 'failed') : 'completed',
-        errorCode: res.errorCode,
-        errorMessage: res.errorMessage
+        if (!page) return results;
+
+        for (const failure of pageFailures) {
+          const { pageLabel, device } = failure;
+
+          onProgress?.({
+            total, completed,
+            currentPage: pageLabel, currentDevice: device,
+            pageUpdate: { pageLabel, device, status: 'running' }
+          });
+
+          // Retries use longer timeout (120s) — gives heavy pages extra headroom
+          const res = await auditPageDevice(page.url, device, pageId, PAGESPEED_RETRY_TIMEOUT_MS);
+          completed++;
+
+          onProgress?.({
+            total, completed,
+            currentPage: pageLabel, currentDevice: device,
+            pageUpdate: {
+              pageLabel, device,
+              status: res.failed ? (res.errorCode === 'timeout' ? 'timeout' : 'failed') : 'completed',
+              errorCode: res.errorCode,
+              errorMessage: res.errorMessage
+            }
+          });
+
+          if (res.failed) {
+            results.failures.push({
+              pageId, pageLabel, device,
+              errorCode: res.errorCode || 'api-error',
+              errorMessage: res.errorMessage || 'Unknown error'
+            });
+          } else {
+            results.successes.push({ pageId, pageLabel, device, errorCode: '', errorMessage: '' });
+            results.metrics.push(...res.metrics);
+            results.categoryScores.push(...res.categoryScores);
+            results.diagnostics.push(...res.diagnostics);
+            if (res.cwvAssessment) results.cwvAssessments.push(res.cwvAssessment);
+          }
+        }
+
+        return results;
+      })
+    );
+
+    // Merge batch results
+    for (const result of batchResults) {
+      remainingFailures.push(...result.failures);
+
+      // For each success, remove old failed entries and add new data
+      for (const success of result.successes) {
+        const filterOut = (m: { pageId: string; device: Device }) =>
+          m.pageId !== success.pageId || m.device !== success.device;
+
+        mergedMetrics = mergedMetrics.filter(filterOut);
+        mergedCategoryScores = mergedCategoryScores.filter(filterOut);
+        mergedDiagnostics = mergedDiagnostics.filter(filterOut);
+        mergedCwvAssessments = mergedCwvAssessments.filter(filterOut);
       }
-    });
 
-    if (res.failed) {
-      remainingFailures.push({
-        pageId,
-        pageLabel,
-        device,
-        errorCode: res.errorCode || 'api-error',
-        errorMessage: res.errorMessage || 'Unknown error'
-      });
-    } else {
-      // Remove old failed/empty entries for this page+device, add new successful results
-      const filterOut = (m: { pageId: string; device: Device }) =>
-        m.pageId !== pageId || m.device !== device;
-
-      mergedMetrics = mergedMetrics.filter(filterOut);
-      mergedCategoryScores = mergedCategoryScores.filter(filterOut);
-      mergedDiagnostics = mergedDiagnostics.filter(filterOut);
-      mergedCwvAssessments = mergedCwvAssessments.filter(filterOut);
-
-      mergedMetrics.push(...res.metrics);
-      mergedCategoryScores.push(...res.categoryScores);
-      mergedDiagnostics.push(...res.diagnostics);
-      if (res.cwvAssessment) mergedCwvAssessments.push(res.cwvAssessment);
+      mergedMetrics.push(...result.metrics);
+      mergedCategoryScores.push(...result.categoryScores);
+      mergedDiagnostics.push(...result.diagnostics);
+      mergedCwvAssessments.push(...result.cwvAssessments);
     }
   }
 
@@ -1348,10 +1421,6 @@ export async function retryFailedItems(
     pageFailures: remainingFailures
   };
 }
-
-// Max pages to audit concurrently. Keeps API rate pressure reasonable.
-// Reduced from 2 to 1 to prevent API timeout and rate limiting.
-const PAGE_CONCURRENCY = 1;
 
 export async function runAudit(
   formData: AuditFormData,
@@ -1386,67 +1455,92 @@ export async function runAudit(
   const total = pages.length * 2; // mobile + desktop per page
   let completed = 0;
 
-  // Process pages in concurrent batches
-  for (let i = 0; i < pages.length; i += PAGE_CONCURRENCY) {
-    const batch = pages.slice(i, i + PAGE_CONCURRENCY);
+  // Dynamic concurrency: scales with page count, drops to 1 without API key
+  const pageConcurrency = getPageConcurrency(pages.length);
+  let rateLimited = false; // adaptive throttle flag — set on 429
 
-    // Notify: batch starting
-    batch.forEach(page => {
-      onProgress?.({
-        total,
-        completed,
-        currentPage: page.pageLabel,
-        currentDevice: 'mobile',
-        pageUpdate: { pageLabel: page.pageLabel, device: 'mobile', status: 'running' }
-      });
-    });
+  // Reset throttle timestamp for each new audit
+  lastCallTimestamp = 0;
 
-    // For each page in the batch, run mobile + desktop STRICTLY sequentially.
-    // Running them in parallel on the same URL triggers Google API timeouts & queueing.
-    for (const page of batch) {
-      for (const device of ['mobile', 'desktop'] as Device[]) {
-        onProgress?.({
-          total,
-          completed,
-          currentPage: page.pageLabel,
-          currentDevice: device,
-          pageUpdate: { pageLabel: page.pageLabel, device, status: 'running' }
-        });
+  console.log(`[Audit] Starting audit: ${pages.length} pages, concurrency: ${pageConcurrency}`);
 
-        const res = await auditPageDevice(page.url, device, page.pageId);
-        completed++;
+  // Process pages in parallel batches
+  for (let i = 0; i < pages.length; i += (rateLimited ? 1 : pageConcurrency)) {
+    const batchSize = rateLimited ? 1 : pageConcurrency;
+    const batch = pages.slice(i, i + batchSize);
 
-        onProgress?.({
-          total,
-          completed,
-          currentPage: page.pageLabel,
-          currentDevice: device,
-          pageUpdate: {
-            pageLabel: page.pageLabel,
-            device,
-            status: res.failed ? (res.errorCode === 'timeout' ? 'timeout' : 'failed') : 'completed',
-            errorCode: res.errorCode,
-            errorMessage: res.errorMessage
-          }
-        });
+    console.log(`[Audit] Batch ${Math.floor(i / batchSize) + 1}: processing ${batch.length} page(s) in parallel`);
 
-        if (res.failed) {
-          pageFailures.push({
-            pageId: page.pageId,
-            pageLabel: page.pageLabel,
-            device,
-            errorCode: res.errorCode || 'api-error',
-            errorMessage: res.errorMessage || 'Unknown error'
+    // Process pages in this batch concurrently via Promise.all
+    // Each page runs mobile → desktop SEQUENTIALLY (same-URL parallel causes Google queueing)
+    // Different pages run in PARALLEL (safe with API key)
+    const batchResults = await Promise.all(
+      batch.map(async (page) => {
+        const pageResult = {
+          metrics: [] as MetricResult[],
+          categoryScores: [] as CategoryScore[],
+          diagnostics: [] as DiagnosticItem[],
+          cwvAssessments: [] as CWVAssessment[],
+          failures: [] as FullAuditResult['pageFailures']
+        };
+
+        for (const device of ['mobile', 'desktop'] as Device[]) {
+          onProgress?.({
+            total, completed,
+            currentPage: page.pageLabel, currentDevice: device,
+            pageUpdate: { pageLabel: page.pageLabel, device, status: 'running' }
           });
+
+          const res = await auditPageDevice(page.url, device, page.pageId);
+          completed++;
+
+          // Detect rate limiting → adaptive throttle-back
+          if (res.errorCode === 'rate-limit' && !rateLimited) {
+            rateLimited = true;
+            console.log('[Audit] Rate limited — reducing to sequential mode for remaining pages');
+            await new Promise(r => setTimeout(r, 3000)); // 3s cooldown
+          }
+
+          onProgress?.({
+            total, completed,
+            currentPage: page.pageLabel, currentDevice: device,
+            pageUpdate: {
+              pageLabel: page.pageLabel, device,
+              status: res.failed ? (res.errorCode === 'timeout' ? 'timeout' : 'failed') : 'completed',
+              errorCode: res.errorCode,
+              errorMessage: res.errorMessage
+            }
+          });
+
+          if (res.failed) {
+            pageResult.failures.push({
+              pageId: page.pageId, pageLabel: page.pageLabel, device,
+              errorCode: res.errorCode || 'api-error',
+              errorMessage: res.errorMessage || 'Unknown error'
+            });
+          }
+
+          pageResult.metrics.push(...res.metrics);
+          pageResult.categoryScores.push(...res.categoryScores);
+          pageResult.diagnostics.push(...res.diagnostics);
+          if (res.cwvAssessment) pageResult.cwvAssessments.push(res.cwvAssessment);
         }
 
-        allMetrics.push(...res.metrics);
-        allCategoryScores.push(...res.categoryScores);
-        allDiagnostics.push(...res.diagnostics);
-        if (res.cwvAssessment) allCwvAssessments.push(res.cwvAssessment);
-      }
+        return pageResult;
+      })
+    );
+
+    // Merge batch results into master arrays
+    for (const result of batchResults) {
+      allMetrics.push(...result.metrics);
+      allCategoryScores.push(...result.categoryScores);
+      allDiagnostics.push(...result.diagnostics);
+      allCwvAssessments.push(...result.cwvAssessments);
+      pageFailures.push(...result.failures);
     }
   }
+
+  console.log(`[Audit] Complete: ${allMetrics.length} metrics, ${pageFailures.length} failures`);
 
   return {
     run,

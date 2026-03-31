@@ -2,8 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { Activity, Bell, Settings, User } from 'lucide-react';
-import { Button } from '@/components/ui/button';
+import { Settings } from 'lucide-react';
 
 export function Navbar() {
     const pathname = usePathname();
@@ -14,53 +13,57 @@ export function Navbar() {
     };
 
     return (
-        <nav className="bg-white border-b border-slate-200 sticky top-0 z-50">
-            <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-                <div className="flex justify-between h-16">
-                    <div className="flex">
-                        {/* Logo */}
-                        <div className="flex-shrink-0 flex items-center gap-2">
-                            <Activity className="h-6 w-6 text-slate-800" />
-                            <span className="font-bold text-xl text-slate-900 tracking-tight">PerformancePilot</span>
-                        </div>
-
-                        {/* Desktop Nav Links */}
-                        <div className="hidden sm:ml-10 sm:flex sm:space-x-8">
-                            <Link
-                                href="/"
-                                className={`inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium ${isNavActive('/') && !isNavActive('/audit')
-                                        ? 'border-slate-800 text-slate-900'
-                                        : 'border-transparent text-slate-500 hover:border-slate-300 hover:text-slate-700'
-                                    }`}
-                            >
-                                Dashboard
-                            </Link>
-                            <Link
-                                href="/audit"
-                                className={`inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium ${isNavActive('/audit')
-                                        ? 'border-slate-800 text-slate-900'
-                                        : 'border-transparent text-slate-500 hover:border-slate-300 hover:text-slate-700'
-                                    }`}
-                            >
-                                New Audit
-                            </Link>
-                        </div>
-                    </div>
-
-                    {/* Right side icons */}
-                    <div className="flex items-center gap-4">
-                        <Button variant="ghost" size="icon" className="text-slate-500 hover:text-slate-700">
-                            <Bell className="h-5 w-5" />
-                        </Button>
-                        <Link href="/settings">
-                            <Button variant="ghost" size="icon" className="text-slate-500 hover:text-slate-700">
-                                <Settings className="h-5 w-5" />
-                            </Button>
+        <nav className="bg-card/80 backdrop-blur-xl border-b border-border sticky top-0 z-50 transition-colors">
+            <div className="max-w-7xl mx-auto px-6 flex items-center justify-between h-14">
+                {/* Left: Logo + Nav Links */}
+                <div className="flex items-center gap-8">
+                    <Link href="/" className="flex items-center gap-2 no-underline">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} className="text-foreground">
+                            <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
+                        </svg>
+                        <span className="font-semibold text-base text-foreground tracking-[-0.02em]">PerformancePilot</span>
+                    </Link>
+                    <div className="hidden sm:flex items-center gap-6">
+                        <Link
+                            href="/"
+                            className={`relative text-sm font-medium transition-colors py-1 ${
+                                isNavActive('/') && !isNavActive('/audit') && !isNavActive('/compare') && !isNavActive('/settings') && !isNavActive('/results') && !isNavActive('/about')
+                                    ? 'text-foreground after:absolute after:bottom-[-2px] after:left-0 after:w-full after:h-[1.5px] after:bg-foreground'
+                                    : 'text-muted-foreground hover:text-foreground'
+                            }`}
+                        >
+                            Dashboard
                         </Link>
-                        <div className="h-8 w-8 rounded-full bg-slate-200 flex items-center justify-center overflow-hidden border border-slate-300">
-                            <User className="h-5 w-5 text-slate-400" />
-                        </div>
+                        <Link
+                            href="/audit"
+                            className={`relative text-sm font-medium transition-colors py-1 ${
+                                isNavActive('/audit')
+                                    ? 'text-foreground after:absolute after:bottom-[-2px] after:left-0 after:w-full after:h-[1.5px] after:bg-foreground'
+                                    : 'text-muted-foreground hover:text-foreground'
+                            }`}
+                        >
+                            New Audit
+                        </Link>
+                        <Link
+                            href="/about"
+                            className={`relative text-sm font-medium transition-colors py-1 ${
+                                isNavActive('/about')
+                                    ? 'text-foreground after:absolute after:bottom-[-2px] after:left-0 after:w-full after:h-[1.5px] after:bg-foreground'
+                                    : 'text-muted-foreground hover:text-foreground'
+                            }`}
+                        >
+                            About
+                        </Link>
                     </div>
+                </div>
+
+                {/* Right: Settings */}
+                <div className="flex items-center gap-3">
+                    <Link href="/settings">
+                        <button className="p-2 rounded-lg border border-border bg-transparent text-muted-foreground hover:bg-muted hover:text-foreground transition-colors cursor-pointer">
+                            <Settings className="h-[18px] w-[18px]" strokeWidth={1.5} />
+                        </button>
+                    </Link>
                 </div>
             </div>
         </nav>

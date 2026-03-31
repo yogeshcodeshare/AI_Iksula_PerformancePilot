@@ -89,7 +89,7 @@ function comparePageMetrics(
 ): ComparisonDelta[] {
   const deltas: ComparisonDelta[] = [];
   const devices: Device[] = ['mobile', 'desktop'];
-  const metrics: MetricName[] = ['LCP', 'INP', 'CLS', 'FCP', 'TTFB', 'performance_score'];
+  const metrics: MetricName[] = ['LCP', 'INP', 'CLS', 'FCP', 'TTFB'];
   
   for (const device of devices) {
     for (const metricName of metrics) {
@@ -142,25 +142,40 @@ function compareCategoryScores(
   return deltas;
 }
 
+// Minimum absolute thresholds to avoid false positives on near-zero values
+function getMinThreshold(metricName: MetricName): number {
+  switch (metricName) {
+    case 'CLS': return 0.01;
+    case 'INP': return 10;
+    case 'LCP': case 'FCP': case 'TTFB': return 50;
+    case 'performance_score': return 1;
+    default: return 0;
+  }
+}
+
 function calculateDelta(
   baseline: MetricResult,
   current: MetricResult,
   pageLabel: string
 ): ComparisonDelta {
   const deltaValue = current.value - baseline.value;
-  
+
   // For Core Web Vitals, lower is better
   let deltaDirection: 'improved' | 'regressed' | 'unchanged';
-  
-  // Define significant change threshold (10% of baseline)
-  const threshold = baseline.value * 0.1;
-  
-  if (Math.abs(deltaValue) < threshold) {
+
+  if (deltaValue === 0) {
     deltaDirection = 'unchanged';
-  } else if (deltaValue < 0) {
-    deltaDirection = 'improved';
   } else {
-    deltaDirection = 'regressed';
+    // Use 10% of baseline OR a minimum absolute threshold, whichever is larger
+    const threshold = Math.max(baseline.value * 0.1, getMinThreshold(baseline.metricName));
+
+    if (Math.abs(deltaValue) < threshold) {
+      deltaDirection = 'unchanged';
+    } else if (deltaValue < 0) {
+      deltaDirection = 'improved';
+    } else {
+      deltaDirection = 'regressed';
+    }
   }
   
   return {
