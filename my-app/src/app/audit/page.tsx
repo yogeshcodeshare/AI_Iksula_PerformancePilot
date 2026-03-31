@@ -2,15 +2,10 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Card, CardContent } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { PageFormData, PageType } from '@/types';
 import { PAGE_TYPES, ENVIRONMENTS } from '@/lib/constants';
-import { Plus, Trash2, ArrowLeft, Play, AlertCircle, Upload } from 'lucide-react';
 import Link from 'next/link';
 
 export default function NewAudit() {
@@ -76,7 +71,6 @@ export default function NewAudit() {
       }
     });
 
-    // Check for duplicate URLs
     const urls = pages.map(p => p.url.trim());
     const duplicates = urls.filter((item, index) => urls.indexOf(item) !== index);
     if (duplicates.length > 0) {
@@ -90,7 +84,6 @@ export default function NewAudit() {
   const handleStartAudit = () => {
     if (!validate()) return;
 
-    // Store form data in session storage for the progress page
     const formData = {
       projectName,
       auditLabel,
@@ -104,252 +97,230 @@ export default function NewAudit() {
   };
 
   return (
-    <div className="bg-slate-50 min-h-[calc(100vh-4rem)] pb-24">
-      <main className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <div className="mb-8 relative">
-          <Link href="/" className="inline-flex items-center text-sm font-medium text-slate-500 hover:text-slate-900 mb-4">
-            <ArrowLeft className="h-4 w-4 mr-1" /> Back to Dashboard
-          </Link>
-          <div className="flex justify-between items-start">
-            <div>
-              <h1 className="text-3xl font-bold text-slate-900 tracking-tight">New Audit Configuration</h1>
-              <p className="text-slate-500 mt-2">Define your project parameters and target URLs for performance auditing.</p>
-            </div>
-            <div className="hidden md:flex items-center gap-2 bg-white border border-slate-200 px-3 py-1.5 rounded-full text-xs font-semibold text-slate-600 shadow-sm">
-              <span className="w-2 h-2 rounded-full bg-emerald-500"></span> Project Status: Active Configuration
-            </div>
-          </div>
+    <div className="bg-background min-h-[calc(100vh-4rem)] pb-24">
+      <main className="max-w-[896px] mx-auto px-6 py-10">
+        {/* Back Link */}
+        <Link href="/" className="inline-flex items-center gap-1.5 text-[13px] font-medium text-muted-foreground hover:text-foreground no-underline mb-6">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5}><path d="m15 18-6-6 6-6"/></svg>
+          Back to Dashboard
+        </Link>
+
+        {/* Header */}
+        <div className="mb-10">
+          <h1 className="text-[30px] font-bold text-foreground tracking-[-0.03em]">New Audit Configuration</h1>
+          <p className="text-muted-foreground mt-1.5 text-base">Define your project parameters and target URLs for performance auditing.</p>
         </div>
 
+        {/* Errors */}
         {errors.length > 0 && (
-          <Card className="mb-8 border-red-200 bg-red-50 shadow-sm rounded-xl">
-            <CardContent className="pt-6">
-              <div className="flex items-start gap-3">
-                <AlertCircle className="h-5 w-5 text-red-600 mt-0.5" />
-                <div>
-                  <h3 className="font-medium text-red-900">Please fix the following errors:</h3>
-                  <ul className="mt-2 text-sm text-red-700 space-y-1">
-                    {errors.map((error, i) => (
-                      <li key={i}>{error}</li>
-                    ))}
-                  </ul>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
+          <div className="mb-7 p-4 rounded-xl border flex gap-3" style={{ background: 'var(--red-bg)', borderColor: 'color-mix(in srgb, var(--red-text) 15%, transparent)' }}>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--red-text)" strokeWidth={1.5} className="flex-shrink-0 mt-0.5"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+            <div>
+              <h3 className="font-medium text-sm" style={{ color: 'var(--red-text)' }}>Please fix the following errors:</h3>
+              <ul className="mt-1 text-sm space-y-0.5" style={{ color: 'var(--red-text)' }}>
+                {errors.map((error, i) => <li key={i}>{error}</li>)}
+              </ul>
+            </div>
+          </div>
         )}
 
-        {/* Project Details */}
-        <Card className="mb-8 rounded-xl shadow-sm border-slate-200 overflow-hidden">
-          <div className="flex items-center justify-between p-5 border-b border-slate-100 bg-white">
-            <div className="flex items-center gap-2">
-              <div className="w-8 h-8 rounded bg-slate-100 flex items-center justify-center">
-                <svg className="w-4 h-4 text-slate-700" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 002-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
-                </svg>
+        {/* Project Details — Double Bezel */}
+        <div className="double-bezel mb-7">
+          <div className="double-bezel-inner">
+            <div className="flex items-center gap-2.5 mb-6">
+              <div className="w-7 h-7 rounded-lg bg-background flex items-center justify-center">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} className="text-muted-foreground"><path d="M19 11H5m14 0a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-6a2 2 0 0 1 2-2m14 0V9a2 2 0 0 0-2-2M5 11V9a2 2 0 0 1 2-2m0 0V5a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v2M7 7h10"/></svg>
               </div>
-              <h2 className="text-lg font-bold text-slate-900">Project Details</h2>
+              <h2 className="text-[17px] font-bold text-foreground">Project Details</h2>
             </div>
-            <span className="text-xs font-bold tracking-widest text-slate-400 uppercase">Metadata</span>
-          </div>
-          <CardContent className="pt-6 bg-white">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div className="space-y-2">
-                <Label htmlFor="projectName" className="text-slate-700 font-medium">Project / Site Name <span className="text-red-500">*</span></Label>
-                <Input
-                  id="projectName"
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+              <div>
+                <label className="block text-muted-foreground text-[13px] font-semibold uppercase tracking-[0.06em] mb-2">
+                  Project Name <span style={{ color: 'var(--red-text)' }}>*</span>
+                </label>
+                <input
+                  type="text"
                   value={projectName}
                   onChange={(e) => setProjectName(e.target.value)}
                   placeholder="e.g., E-commerce Core"
-                  className="bg-slate-50 border-slate-200 h-11"
+                  className="w-full h-10 px-3 text-sm bg-card border border-border rounded-lg text-foreground outline-none font-[inherit] placeholder:text-muted-foreground focus:border-foreground focus:shadow-[0_0_0_3px_color-mix(in_srgb,var(--foreground)_10%,transparent)] transition-all"
                 />
               </div>
-              <div className="space-y-2">
-                <Label htmlFor="auditLabel" className="text-slate-700 font-medium">Audit Label <span className="text-red-500">*</span></Label>
-                <Input
-                  id="auditLabel"
+              <div>
+                <label className="block text-muted-foreground text-[13px] font-semibold uppercase tracking-[0.06em] mb-2">
+                  Audit Label <span style={{ color: 'var(--red-text)' }}>*</span>
+                </label>
+                <input
+                  type="text"
                   value={auditLabel}
                   onChange={(e) => setAuditLabel(e.target.value)}
                   placeholder="e.g., Q3 Performance Baseline"
-                  className="bg-slate-50 border-slate-200 h-11"
+                  className="w-full h-10 px-3 text-sm bg-card border border-border rounded-lg text-foreground outline-none font-[inherit] placeholder:text-muted-foreground focus:border-foreground focus:shadow-[0_0_0_3px_color-mix(in_srgb,var(--foreground)_10%,transparent)] transition-all"
                 />
               </div>
-              <div className="space-y-2">
-                <Label htmlFor="environment" className="text-slate-700 font-medium">Environment <span className="text-red-500">*</span></Label>
+              <div>
+                <label className="block text-muted-foreground text-[13px] font-semibold uppercase tracking-[0.06em] mb-2">
+                  Environment <span style={{ color: 'var(--red-text)' }}>*</span>
+                </label>
                 <Select value={environment} onValueChange={setEnvironment}>
-                  <SelectTrigger className="bg-slate-50 border-slate-200 h-11">
+                  <SelectTrigger className="h-10 bg-card border-border">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
                     {ENVIRONMENTS.map((env) => (
-                      <SelectItem key={env.value} value={env.value}>
-                        {env.label}
-                      </SelectItem>
+                      <SelectItem key={env.value} value={env.value}>{env.label}</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
               </div>
-              <div className="space-y-2">
-                <Label htmlFor="deploymentTag" className="text-slate-700 font-medium">Deployment Tag (Optional)</Label>
-                <Input
-                  id="deploymentTag"
+              <div>
+                <label className="block text-muted-foreground text-[13px] font-semibold uppercase tracking-[0.06em] mb-2">Deployment Tag</label>
+                <input
+                  type="text"
                   value={deploymentTag}
                   onChange={(e) => setDeploymentTag(e.target.value)}
                   placeholder="e.g., v2.1.0-release"
-                  className="bg-slate-50 border-slate-200 h-11"
+                  className="w-full h-10 px-3 text-sm bg-card border border-border rounded-lg text-foreground outline-none font-[inherit] placeholder:text-muted-foreground focus:border-foreground focus:shadow-[0_0_0_3px_color-mix(in_srgb,var(--foreground)_10%,transparent)] transition-all"
                 />
               </div>
             </div>
-          </CardContent>
-        </Card>
-
-        {/* Pages */}
-        <Card className="mb-12 rounded-xl shadow-sm border-slate-200 overflow-hidden">
-          <div className="flex items-center justify-between p-5 border-b border-slate-100 bg-white">
-            <div className="flex items-center gap-2">
-              <div className="w-8 h-8 rounded bg-slate-100 flex items-center justify-center">
-                <svg className="w-4 h-4 text-slate-700" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h18M3 14h18m-9-4v8m-7 0h14a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
-                </svg>
-              </div>
-              <h2 className="text-lg font-bold text-slate-900">Pages to Audit</h2>
-            </div>
-            <div className="flex gap-3">
-              <Button
-                variant="outline"
-                size="sm"
-                className="text-slate-600 bg-white border-slate-200 h-9"
-                onClick={() => setShowBulkAdd(!showBulkAdd)}
-              >
-                <Upload className="h-3.5 w-3.5 mr-2" />
-                Bulk Add
-              </Button>
-              <Button size="sm" onClick={addPage} className="bg-slate-900 hover:bg-slate-800 text-white h-9">
-                <Plus className="h-3.5 w-3.5 mr-2" />
-                Add Page
-              </Button>
-            </div>
           </div>
-          <CardContent className="pt-6 bg-white">
+        </div>
+
+        {/* Pages to Audit — Double Bezel */}
+        <div className="double-bezel mb-7">
+          <div className="double-bezel-inner">
+            <div className="flex items-center justify-between mb-6">
+              <div className="flex items-center gap-2.5">
+                <div className="w-7 h-7 rounded-lg bg-background flex items-center justify-center">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} className="text-muted-foreground"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+                </div>
+                <h2 className="text-[17px] font-bold text-foreground">Pages to Audit</h2>
+              </div>
+              <div className="flex gap-2">
+                <button
+                  className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-medium border border-border rounded-lg bg-transparent text-muted-foreground hover:bg-muted hover:text-foreground transition-colors cursor-pointer"
+                  onClick={() => setShowBulkAdd(!showBulkAdd)}
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5}><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                  Bulk Add
+                </button>
+                <button
+                  className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-medium bg-primary text-primary-foreground rounded-lg hover:opacity-85 transition-all cursor-pointer border-none"
+                  onClick={addPage}
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                  Add Page
+                </button>
+              </div>
+            </div>
+
             {showBulkAdd && (
-              <div className="mb-6 p-4 bg-slate-50 rounded-lg">
-                <Label className="mb-2 block">Paste URLs (one per line)</Label>
+              <div className="mb-6 p-4 bg-background rounded-xl border border-border/50">
+                <label className="block text-sm font-medium text-foreground mb-2">Paste URLs (one per line)</label>
                 <Textarea
                   value={bulkUrls}
                   onChange={(e) => setBulkUrls(e.target.value)}
-                  placeholder="https://example.com&#10;https://example.com/page1"
+                  placeholder={"https://example.com\nhttps://example.com/page1"}
                   rows={4}
-                  className="mb-3"
+                  className="mb-3 bg-card"
                 />
                 <div className="flex gap-2">
-                  <Button size="sm" onClick={handleBulkAdd}>Add URLs</Button>
-                  <Button size="sm" variant="ghost" onClick={() => setShowBulkAdd(false)}>
-                    Cancel
-                  </Button>
+                  <button className="px-3 py-1.5 text-xs font-medium bg-primary text-primary-foreground rounded-lg cursor-pointer border-none" onClick={handleBulkAdd}>Add URLs</button>
+                  <button className="px-3 py-1.5 text-xs font-medium text-muted-foreground cursor-pointer border-none bg-transparent hover:text-foreground" onClick={() => setShowBulkAdd(false)}>Cancel</button>
                 </div>
               </div>
             )}
 
-            <div className="space-y-4">
+            <div className="flex flex-col gap-4">
               {pages.map((page, index) => (
-                <div
-                  key={index}
-                  className="flex gap-4 items-start p-4 bg-white border border-slate-200 rounded-xl shadow-sm transition-all"
-                >
-                  <div className="flex items-center justify-center w-8 h-8 rounded-full bg-slate-100 border border-slate-200 text-slate-500 font-semibold text-sm mt-7">
-                    {index + 1}
-                  </div>
-                  <div className="flex-1 grid grid-cols-1 md:grid-cols-12 gap-4">
-                    <div className="md:col-span-3 space-y-2">
-                      <Label className="text-xs font-semibold text-slate-700 tracking-wide">Page Label</Label>
-                      <Input
-                        value={page.pageLabel}
-                        onChange={(e) => updatePage(index, 'pageLabel', e.target.value)}
-                        placeholder="e.g., Store Front"
-                        className="h-10 border-slate-200"
-                      />
+                <div key={index} className="bg-background border border-border/50 rounded-[14px] p-5 transition-all hover:shadow-[var(--shadow-sm)] hover:border-border">
+                  <div className="flex gap-4 items-start">
+                    <div className="w-7 h-7 rounded-full bg-card border border-border flex items-center justify-center text-xs font-semibold text-muted-foreground mt-5 flex-shrink-0">
+                      {index + 1}
                     </div>
-                    <div className="md:col-span-3 space-y-2">
-                      <Label className="text-xs font-semibold text-slate-700 tracking-wide">Page Type</Label>
-                      <Select
-                        value={page.pageType}
-                        onValueChange={(value) => updatePage(index, 'pageType', value)}
-                      >
-                        <SelectTrigger className="h-10 border-slate-200">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {PAGE_TYPES.map((type) => (
-                            <SelectItem key={type.value} value={type.value}>
-                              {type.label}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="md:col-span-6 space-y-2">
-                      <Label className="text-xs font-semibold text-slate-700 tracking-wide">URL</Label>
-                      <div className="relative">
-                        <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                          <svg className="h-4 w-4 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9" />
-                          </svg>
+                    <div className="flex-1">
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                        <div>
+                          <label className="block text-muted-foreground text-[11px] font-semibold uppercase tracking-[0.08em] mb-1.5">Page Label</label>
+                          <input
+                            type="text"
+                            value={page.pageLabel}
+                            onChange={(e) => updatePage(index, 'pageLabel', e.target.value)}
+                            placeholder="e.g., Homepage"
+                            className="w-full h-10 px-3 text-sm bg-card border border-border rounded-lg text-foreground outline-none font-[inherit] placeholder:text-muted-foreground focus:border-foreground transition-all"
+                          />
                         </div>
-                        <Input
-                          value={page.url}
-                          onChange={(e) => updatePage(index, 'url', e.target.value)}
-                          placeholder="https://..."
-                          className="h-10 pl-9 border-slate-200 font-mono text-sm"
-                        />
+                        <div className="flex gap-3">
+                          <div className="flex-1">
+                            <label className="block text-muted-foreground text-[11px] font-semibold uppercase tracking-[0.08em] mb-1.5">Page Type</label>
+                            <Select value={page.pageType} onValueChange={(value) => updatePage(index, 'pageType', value)}>
+                              <SelectTrigger className="h-10 bg-card border-border">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {PAGE_TYPES.map((type) => (
+                                  <SelectItem key={type.value} value={type.value}>{type.label}</SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                          <button
+                            className="self-end mb-0.5 p-2 rounded-lg border-none bg-transparent cursor-pointer transition-colors text-muted-foreground/40 hover:text-[var(--red-text)] hover:bg-[var(--red-bg)] disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-muted-foreground/40"
+                            onClick={() => removePage(index)}
+                            disabled={pages.length === 1}
+                          >
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5}><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>
+                          </button>
+                        </div>
+                      </div>
+                      <div>
+                        <label className="block text-muted-foreground text-[11px] font-semibold uppercase tracking-[0.08em] mb-1.5">URL</label>
+                        <div className="relative">
+                          <svg className="absolute left-2.5 top-1/2 -translate-y-1/2" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} style={{ color: 'var(--ring)' }}><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+                          <input
+                            type="url"
+                            value={page.url}
+                            onChange={(e) => updatePage(index, 'url', e.target.value)}
+                            placeholder="https://example.com"
+                            className="w-full h-10 pl-[34px] pr-3 text-[13px] font-mono bg-card border border-border rounded-lg text-foreground outline-none placeholder:text-muted-foreground focus:border-foreground transition-all"
+                          />
+                        </div>
                       </div>
                     </div>
                   </div>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="mt-[34px] text-slate-400 hover:text-red-500 hover:bg-red-50 h-10 w-10 shrink-0"
-                    onClick={() => removePage(index)}
-                    disabled={pages.length === 1}
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
                 </div>
               ))}
             </div>
 
-            <div className="mt-6 p-4 bg-[#eff6ff] rounded-xl border border-blue-100 flex gap-3">
-              <div className="mt-0.5 text-blue-500">
-                <AlertCircle className="h-5 w-5" />
-              </div>
-              <div className="text-sm text-blue-800">
-                <strong className="font-semibold block mb-0.5 mt-[2px]">Configuration Note</strong>
-                <span className="opacity-90">Each page will be audited for both Mobile and Desktop viewports. PerformancePilot attempts to use PageSpeed Insights API first for real-user data, falling back to Lighthouse for synthetic analysis if PSI is inaccessible.</span>
-              </div>
+            {/* Info Note */}
+            <div className="mt-6 p-4 rounded-xl flex gap-3 border" style={{ background: 'var(--blue-bg)', borderColor: 'color-mix(in srgb, var(--blue-text) 15%, transparent)' }}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--blue-text)" strokeWidth={1.5} className="flex-shrink-0 mt-0.5"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+              <p className="text-xs leading-relaxed" style={{ color: 'var(--blue-text)' }}>
+                Each page will be audited for both <strong>Mobile</strong> and <strong>Desktop</strong> viewports. PageSpeed Insights provides real-user field data when available, with Lighthouse lab data as fallback.
+              </p>
             </div>
-          </CardContent>
-        </Card>
+          </div>
+        </div>
       </main>
 
-      {/* Sticky Bottom Actions */}
-      <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 p-4 z-40 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)]">
-        <div className="max-w-4xl mx-auto flex items-center justify-between">
-          <div className="flex items-center gap-2 text-sm text-slate-500">
-            <span className="hidden sm:inline font-medium">
-              {pages.length} page{pages.length !== 1 ? 's' : ''} configured &mdash; {pages.length * 2} audits queued (mobile + desktop)
-            </span>
-          </div>
-
-          <div className="flex gap-4">
+      {/* Sticky Bottom */}
+      <div className="fixed bottom-0 left-0 right-0 z-40 backdrop-blur-xl border-t border-border" style={{ background: 'color-mix(in srgb, var(--card) 80%, transparent)' }}>
+        <div className="max-w-[896px] mx-auto px-6 flex items-center justify-between h-16">
+          <span className="text-muted-foreground text-sm">
+            <strong className="text-foreground font-medium">{pages.length} page{pages.length !== 1 ? 's' : ''}</strong> configured &mdash; {pages.length * 2} audits queued (mobile + desktop)
+          </span>
+          <div className="flex gap-3">
             <Link href="/">
-              <Button variant="ghost" className="font-medium text-slate-600 pointer-events-auto h-12 px-6">Cancel</Button>
+              <button className="px-4 py-2 text-[13px] font-medium border border-border rounded-[10px] bg-transparent text-muted-foreground hover:bg-muted hover:text-foreground transition-colors cursor-pointer">Cancel</button>
             </Link>
-            <Button
+            <button
               onClick={handleStartAudit}
-              className="bg-slate-900 hover:bg-slate-800 text-white font-medium h-12 px-8 shadow-sm rounded-md"
+              className="inline-flex items-center gap-2 px-5 py-2.5 text-sm font-medium bg-primary text-primary-foreground rounded-[10px] hover:opacity-85 active:scale-[0.98] transition-all cursor-pointer border-none"
             >
-              <Play className="h-4 w-4 mr-2" fill="currentColor" />
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
               Start Performance Audit
-            </Button>
+            </button>
           </div>
         </div>
       </div>

@@ -34,9 +34,9 @@ export function CWVAssessmentCard({
 }: CWVAssessmentCardProps) {
   if (!assessment) {
     return (
-      <Card className="rounded-xl shadow-sm border-slate-200">
+      <Card className="rounded-xl shadow-sm border-border">
         <CardContent className="p-6">
-          <div className="flex items-center justify-center text-slate-400">
+          <div className="flex items-center justify-center text-muted-foreground">
             <AlertCircle className="h-5 w-5 mr-2" />
             <span>No assessment data available</span>
           </div>
@@ -52,7 +52,7 @@ export function CWVAssessmentCard({
       case 'failed':
         return <XCircle className="h-6 w-6 text-red-500" />;
       default:
-        return <AlertCircle className="h-6 w-6 text-slate-400" />;
+        return <AlertCircle className="h-6 w-6 text-muted-foreground" />;
     }
   };
 
@@ -88,25 +88,25 @@ export function CWVAssessmentCard({
       case 'poor':
         return 'text-red-600 bg-red-50 border-red-200';
       default:
-        return 'text-slate-600 bg-slate-50 border-slate-200';
+        return 'text-muted-foreground bg-secondary border-border';
     }
   };
 
   const DeviceIcon = device === 'mobile' ? Smartphone : Monitor;
 
   return (
-    <Card className="rounded-xl shadow-sm border-slate-200 overflow-hidden">
-      <CardHeader className="pb-4 bg-slate-50/50 border-b border-slate-100">
+    <Card className="rounded-xl shadow-sm border-border overflow-hidden">
+      <CardHeader className="pb-4 bg-secondary/50 border-b border-border">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="h-10 w-10 bg-white rounded-lg flex items-center justify-center border border-slate-200 shadow-sm">
+            <div className="h-10 w-10 bg-card rounded-lg flex items-center justify-center border border-border shadow-sm">
               <Activity className="h-5 w-5 text-blue-500" />
             </div>
             <div>
-              <CardTitle className="text-base font-bold text-slate-900">
+              <CardTitle className="text-base font-bold text-foreground">
                 Core Web Vitals Assessment
               </CardTitle>
-              <p className="text-xs text-slate-500 mt-0.5">
+              <p className="text-xs text-muted-foreground mt-0.5">
                 {pageLabel} · <DeviceIcon className="h-3 w-3 inline mr-0.5" /> {device === 'mobile' ? 'Mobile' : 'Desktop'}
               </p>
             </div>
@@ -143,11 +143,11 @@ export function CWVAssessmentCard({
 
       <CardContent className="p-0">
         {/* Assessment Summary */}
-        <div className="p-4 border-b border-slate-100">
+        <div className="p-4 border-b border-border">
           <div className="flex items-start gap-3">
             {getStatusIcon()}
             <div className="flex-1">
-              <p className="text-sm text-slate-700 leading-relaxed">
+              <p className="text-sm text-foreground leading-relaxed">
                 {assessment.interpretation}
               </p>
               {fallbackTriggered && fallbackReason && (
@@ -161,7 +161,7 @@ export function CWVAssessmentCard({
         </div>
 
         {/* Metric Grid */}
-        <div className="grid grid-cols-5 divide-x divide-slate-100">
+        <div className="grid grid-cols-5 divide-x divide-border">
           {/* LCP */}
           <MetricItem
             label="LCP"
@@ -225,8 +225,8 @@ function MetricItem({ label, fullLabel, value, metricName, getStatusColor }: Met
     <TooltipProvider>
       <Tooltip>
         <TooltipTrigger asChild>
-          <div className="p-4 text-center hover:bg-slate-50 transition-colors cursor-help">
-            <p className="text-xs font-bold text-slate-400 mb-1">{label}</p>
+          <div className="p-4 text-center hover:bg-secondary transition-colors cursor-help">
+            <p className="text-xs font-bold text-muted-foreground mb-1">{label}</p>
             {value ? (
               <div className={cn(
                 "inline-flex items-center px-2 py-1 rounded-full border text-sm font-bold",
@@ -235,14 +235,14 @@ function MetricItem({ label, fullLabel, value, metricName, getStatusColor }: Met
                 {value.displayValue}
               </div>
             ) : (
-              <span className="text-sm text-slate-300">N/A</span>
+              <span className="text-sm text-muted-foreground/50">N/A</span>
             )}
           </div>
         </TooltipTrigger>
         <TooltipContent side="bottom">
           <p className="font-semibold">{fullLabel}</p>
           {value && (
-            <p className="text-xs text-slate-500 capitalize mt-1">
+            <p className="text-xs text-muted-foreground capitalize mt-1">
               Status: {value.status.replace(/-/g, ' ')}
             </p>
           )}

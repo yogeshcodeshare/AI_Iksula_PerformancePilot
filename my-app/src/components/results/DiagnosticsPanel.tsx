@@ -79,12 +79,12 @@ const groupConfig: Record<string, { label: string; icon: React.ElementType; orde
 };
 
 const statusConfig: Record<DiagnosticStatus, { label: string; color: string; icon: React.ElementType }> = {
-  'pass': { label: 'Passed', color: 'text-green-600 bg-green-50 border-green-200', icon: CheckCircle2 },
-  'fail': { label: 'Failed', color: 'text-red-600 bg-red-50 border-red-200', icon: XCircle },
-  'warning': { label: 'Warning', color: 'text-amber-600 bg-amber-50 border-amber-200', icon: AlertTriangle },
-  'manual': { label: 'Manual Check', color: 'text-blue-600 bg-blue-50 border-blue-200', icon: HelpCircle },
-  'not-applicable': { label: 'N/A', color: 'text-slate-400 bg-slate-50 border-slate-200', icon: MinusCircle },
-  'informative': { label: 'Info', color: 'text-slate-600 bg-slate-50 border-slate-200', icon: Info },
+  'pass': { label: 'Passed', color: 'border', icon: CheckCircle2 },
+  'fail': { label: 'Failed', color: 'border', icon: XCircle },
+  'warning': { label: 'Warning', color: 'border', icon: AlertTriangle },
+  'manual': { label: 'Manual Check', color: 'border', icon: HelpCircle },
+  'not-applicable': { label: 'N/A', color: 'text-muted-foreground bg-secondary border-border', icon: MinusCircle },
+  'informative': { label: 'Info', color: 'text-muted-foreground bg-secondary border-border', icon: Info },
 };
 
 export function DiagnosticsPanel({
@@ -170,20 +170,21 @@ export function DiagnosticsPanel({
     }
   };
 
-  const FilterButton = ({ type, label }: { type: FilterType; label: string }) => (
+  const renderFilterButton = (type: FilterType, label: string) => (
     <button
+      key={type}
       onClick={() => setFilter(type)}
       className={cn(
-        "px-3 py-1.5 rounded-full text-xs font-medium transition-all",
+        "px-3.5 py-1.5 rounded-full text-xs font-medium transition-all",
         filter === type
-          ? "bg-slate-900 text-white shadow-sm"
-          : "bg-white text-slate-600 hover:bg-slate-100 border border-slate-200"
+          ? "bg-primary text-primary-foreground shadow-sm"
+          : "bg-card text-muted-foreground hover:bg-secondary border border-border"
       )}
     >
       {label}
       <span className={cn(
         "ml-1.5 px-1.5 py-0.5 rounded-full text-[10px]",
-        filter === type ? "bg-slate-700 text-slate-300" : "bg-slate-100 text-slate-500"
+        filter === type ? "bg-primary-foreground/20 text-primary-foreground" : "bg-secondary text-muted-foreground"
       )}>
         {getFilterCount(type)}
       </span>
@@ -191,42 +192,42 @@ export function DiagnosticsPanel({
   );
 
   return (
-    <Card className="rounded-xl shadow-sm border-slate-200 overflow-hidden">
-      <CardHeader className="pb-4 bg-slate-50/50 border-b border-slate-100">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+    <Card className="rounded-xl shadow-sm border-border overflow-hidden">
+      <CardHeader className="pb-3 pt-4 bg-secondary/50 border-b border-border">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div>
-            <CardTitle className="text-sm font-bold tracking-widest text-slate-500 uppercase">
+            <CardTitle className="text-[14px] font-bold tracking-wide text-foreground uppercase">
               Diagnose Performance Issues
             </CardTitle>
-            <p className="text-xs text-slate-400 mt-1">
+            <p className="text-xs text-muted-foreground mt-0.5">
               {pageLabel} · {device === 'mobile' ? 'Mobile' : 'Desktop'}
             </p>
           </div>
 
           <div className="flex items-center gap-2">
-            <FilterButton type="all" label="All" />
-            <FilterButton type="failed" label="Failed" />
-            <FilterButton type="warning" label="Warnings" />
-            <FilterButton type="passed" label="Passed" />
+            {renderFilterButton('all', 'All')}
+            {renderFilterButton('failed', 'Failed')}
+            {renderFilterButton('warning', 'Warnings')}
+            {renderFilterButton('passed', 'Passed')}
           </div>
         </div>
 
         {/* Search bar */}
-        <div className="relative mt-2">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+        <div className="relative mt-3">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input
             placeholder="Search diagnostic items..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="pl-9 h-9 text-sm border-slate-200 bg-white"
+            className="pl-9 h-10 text-sm border-border bg-card"
           />
         </div>
       </CardHeader>
 
       <CardContent className="p-0">
         {filteredDiagnostics.length === 0 ? (
-          <div className="p-8 text-center text-slate-500">
-            <Info className="h-12 w-12 mx-auto mb-3 text-slate-300" />
+          <div className="p-8 text-center text-muted-foreground">
+            <Info className="h-12 w-12 mx-auto mb-3 text-muted-foreground/40" />
             <p className="text-sm">No diagnostic items found for this filter.</p>
             {searchQuery && (
               <button
@@ -251,16 +252,16 @@ export function DiagnosticsPanel({
                 const warnCount = items.filter(i => i.status === 'warning').length;
 
                 return (
-                  <AccordionItem key={group} value={group} className="border-b border-slate-100">
-                    <AccordionTrigger className="hover:no-underline py-4 px-4 hover:bg-slate-50">
+                  <AccordionItem key={group} value={group} className="border-b border-border">
+                    <AccordionTrigger className="hover:no-underline py-4 px-4 hover:bg-secondary">
                       <div className="flex items-center gap-3 w-full pr-4">
-                        <div className="h-8 w-8 rounded-lg bg-slate-100 flex items-center justify-center shrink-0">
-                          <Icon className="h-4 w-4 text-slate-500" />
+                        <div className="h-8 w-8 rounded-lg bg-muted flex items-center justify-center shrink-0">
+                          <Icon className="h-4 w-4 text-muted-foreground" />
                         </div>
                         <div className="flex-1 text-left">
                           <div className="flex items-center gap-2">
-                            <span className="font-semibold text-slate-900">{config.label}</span>
-                            <span className="text-xs text-slate-400">({items.length})</span>
+                            <span className="font-semibold text-foreground">{config.label}</span>
+                            <span className="text-xs text-muted-foreground">({items.length})</span>
                           </div>
                         </div>
                         {(failCount > 0 || warnCount > 0) && (
@@ -280,7 +281,7 @@ export function DiagnosticsPanel({
                       </div>
                     </AccordionTrigger>
                     <AccordionContent className="pb-0">
-                      <div className="divide-y divide-slate-50">
+                      <div className="divide-y divide-border">
                         {items.map((item) => (
                           <DiagnosticItemRow key={item.id} item={item} />
                         ))}
@@ -302,40 +303,38 @@ function DiagnosticItemRow({ item }: { item: DiagnosticItem }) {
   const StatusIcon = statusConfig.icon;
 
   return (
-    <div className="p-4 pl-16 hover:bg-slate-50/50 transition-colors">
+    <div className="p-4 pl-16 hover:bg-secondary/50 transition-colors">
       <div className="flex items-start gap-3">
-        <div className={cn(
-          "h-6 w-6 rounded flex items-center justify-center shrink-0 mt-0.5",
-          statusConfig.bgColor
-        )}>
-          <StatusIcon className={cn("h-3.5 w-3.5", statusConfig.textColor)} />
+        <div
+          className="h-6 w-6 rounded flex items-center justify-center shrink-0 mt-0.5"
+          style={{ background: `var(${statusConfig.bgVar})` }}
+        >
+          <StatusIcon className="h-3.5 w-3.5" style={{ color: `var(${statusConfig.colorVar})` }} />
         </div>
 
         <div className="flex-1 min-w-0">
           <div className="flex items-start justify-between gap-2">
-            <h4 className="font-medium text-slate-900 text-sm">{item.title}</h4>
+            <h4 className="font-medium text-foreground text-sm">{item.title}</h4>
             <Badge
               variant="outline"
-              className={cn(
-                "text-[10px] uppercase tracking-wider shrink-0",
-                statusConfig.badgeClass
-              )}
+              className="text-[10px] uppercase tracking-wider shrink-0 border-transparent"
+              style={{ background: `var(${statusConfig.bgVar})`, color: `var(${statusConfig.colorVar})` }}
             >
               {statusConfig.label}
             </Badge>
           </div>
 
-          <p className="text-xs text-slate-500 mt-1 line-clamp-2">{item.description}</p>
+          <p className="text-xs text-muted-foreground mt-1 line-clamp-2">{item.description}</p>
 
           {(item.displayValue || item.savings) && (
             <div className="flex items-center gap-3 mt-2">
               {item.displayValue && (
-                <span className="text-xs font-medium text-slate-700 bg-slate-100 px-2 py-0.5 rounded">
+                <span className="text-xs font-medium text-foreground bg-muted px-2 py-0.5 rounded">
                   {item.displayValue}
                 </span>
               )}
               {item.savings && (
-                <span className="text-xs font-medium text-green-700 bg-green-50 px-2 py-0.5 rounded flex items-center">
+                <span className="text-xs font-medium px-2 py-0.5 rounded flex items-center" style={{ color: 'var(--green-text)', background: 'var(--green-bg)' }}>
                   <Clock className="h-3 w-3 mr-1" />
                   Save {formatSavings(item.savings, item.savingsUnit)}
                 </span>
@@ -355,23 +354,23 @@ function DiagnosticItemRow({ item }: { item: DiagnosticItem }) {
           )}
 
           {item.recommendation && (
-            <div className="mt-4 p-3 bg-blue-50/50 border border-blue-100/50 rounded-lg">
+            <div className="mt-4 p-3 rounded-lg border" style={{ background: 'var(--blue-bg)', borderColor: 'color-mix(in srgb, var(--blue-text) 15%, transparent)' }}>
               <div className="flex items-center justify-between mb-1.5">
-                <p className="text-[10px] font-black text-blue-900 uppercase tracking-tighter flex items-center gap-1.5">
+                <p className="text-[10px] font-black uppercase tracking-tighter flex items-center gap-1.5" style={{ color: 'var(--blue-text)' }}>
                   <Zap className="h-3 w-3" />
                   Recommended Fix
                 </p>
                 {item.suggestedOwner && (
-                  <Badge variant="secondary" className="h-5 px-1.5 text-[9px] font-black uppercase tracking-tighter bg-blue-100 text-blue-700">
+                  <Badge variant="secondary" className="h-5 px-1.5 text-[9px] font-black uppercase tracking-tighter border-none" style={{ background: 'color-mix(in srgb, var(--blue-text) 20%, transparent)', color: 'var(--blue-text)' }}>
                     Owner: {item.suggestedOwner}
                   </Badge>
                 )}
               </div>
-              <p className="text-xs text-blue-800 font-semibold leading-relaxed">
+              <p className="text-xs font-semibold leading-relaxed" style={{ color: 'var(--blue-text)' }}>
                 {item.recommendation}
               </p>
               {item.whyItMatters && (
-                <p className="text-[10px] text-blue-600/80 mt-1.5 italic">
+                <p className="text-[10px] mt-1.5 italic" style={{ color: 'var(--blue-text)', opacity: 0.75 }}>
                   Why it matters: {item.whyItMatters}
                 </p>
               )}
@@ -381,12 +380,12 @@ function DiagnosticItemRow({ item }: { item: DiagnosticItem }) {
           {item.details && (
             <div className="mt-3">
               <details className="text-xs group">
-                <summary className="cursor-pointer text-slate-400 hover:text-slate-600 font-bold uppercase tracking-widest text-[9px] flex items-center gap-1">
+                <summary className="cursor-pointer text-muted-foreground hover:text-foreground font-bold uppercase tracking-widest text-[9px] flex items-center gap-1 transition-colors">
                   <FileCode className="h-3 w-3" />
                   View Technical Details
                 </summary>
-                <div className="mt-2 p-3 bg-slate-900 text-slate-300 font-mono text-[10px] rounded-lg overflow-auto max-h-48 border border-slate-800 shadow-inner">
-                  {item.details}
+                <div className="mt-2 rounded-lg overflow-auto max-h-72 border border-border">
+                  <FormattedDetails details={item.details} />
                 </div>
               </details>
             </div>
@@ -397,55 +396,153 @@ function DiagnosticItemRow({ item }: { item: DiagnosticItem }) {
   );
 }
 
+function FormattedDetails({ details }: { details: string }) {
+  // Try to parse as JSON and render as a readable table
+  try {
+    const parsed = JSON.parse(details);
+
+    // Handle array of objects (most common — e.g. list of resources)
+    if (Array.isArray(parsed?.items) && parsed.items.length > 0) {
+      const items = parsed.items;
+      const headings: { key: string; label: string }[] = (parsed.headings || [])
+        .filter((h: any) => h?.key && h.key !== 'node')
+        .map((h: any) => ({ key: h.key, label: h.label || h.key }));
+
+      // If we have headings, render a table
+      if (headings.length > 0) {
+        return (
+          <table className="w-full text-[11px]">
+            <thead>
+              <tr className="bg-secondary border-b border-border">
+                {headings.map(h => (
+                  <th key={h.key} className="text-left px-3 py-2 font-bold text-muted-foreground uppercase tracking-wider text-[10px]">
+                    {h.label}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {items.slice(0, 20).map((item: any, idx: number) => (
+                <tr key={idx} className={cn("border-b border-border last:border-0", idx % 2 === 0 ? "bg-card" : "bg-secondary/30")}>
+                  {headings.map(h => (
+                    <td key={h.key} className="px-3 py-2 text-foreground/80 font-mono break-all max-w-[300px]">
+                      {formatCellValue(item[h.key])}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+            {items.length > 20 && (
+              <tfoot>
+                <tr><td colSpan={headings.length} className="px-3 py-2 text-muted-foreground text-center text-[10px]">
+                  ...and {items.length - 20} more items
+                </td></tr>
+              </tfoot>
+            )}
+          </table>
+        );
+      }
+    }
+
+    // Handle plain array of objects without headings
+    if (Array.isArray(parsed) && parsed.length > 0 && typeof parsed[0] === 'object') {
+      const keys = Object.keys(parsed[0]).filter(k => k !== 'node');
+      return (
+        <table className="w-full text-[11px]">
+          <thead>
+            <tr className="bg-secondary border-b border-border">
+              {keys.map(k => (
+                <th key={k} className="text-left px-3 py-2 font-bold text-muted-foreground uppercase tracking-wider text-[10px]">{k}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {parsed.slice(0, 20).map((item: any, idx: number) => (
+              <tr key={idx} className={cn("border-b border-border last:border-0", idx % 2 === 0 ? "bg-card" : "bg-secondary/30")}>
+                {keys.map(k => (
+                  <td key={k} className="px-3 py-2 text-foreground/80 font-mono break-all max-w-[300px]">
+                    {formatCellValue(item[k])}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      );
+    }
+
+    // Fallback: pretty-print JSON
+    return (
+      <pre className="p-3 bg-secondary text-foreground/80 font-mono text-[11px] leading-relaxed whitespace-pre-wrap break-all">
+        {JSON.stringify(parsed, null, 2)}
+      </pre>
+    );
+  } catch {
+    // Not JSON — render as plain text
+    return (
+      <div className="p-3 bg-secondary text-foreground/80 font-mono text-[11px] leading-relaxed whitespace-pre-wrap break-all">
+        {details}
+      </div>
+    );
+  }
+}
+
+function formatCellValue(val: any): string {
+  if (val === null || val === undefined) return '—';
+  if (typeof val === 'number') {
+    if (val >= 1024 * 1024) return `${(val / (1024 * 1024)).toFixed(1)} MB`;
+    if (val >= 1024) return `${(val / 1024).toFixed(1)} KB`;
+    if (val > 0 && val < 1) return val.toFixed(3);
+    if (Number.isInteger(val)) return val.toLocaleString();
+    return val.toFixed(1);
+  }
+  if (typeof val === 'object') return JSON.stringify(val);
+  return String(val);
+}
+
 function getStatusConfig(status: DiagnosticStatus) {
   switch (status) {
     case 'pass':
       return {
         label: 'Passed',
         icon: CheckCircle2,
-        textColor: 'text-green-600',
-        bgColor: 'bg-green-50',
-        badgeClass: 'border-green-200 text-green-700 bg-green-50'
+        colorVar: '--green-text',
+        bgVar: '--green-bg',
       };
     case 'fail':
       return {
         label: 'Failed',
         icon: XCircle,
-        textColor: 'text-red-600',
-        bgColor: 'bg-red-50',
-        badgeClass: 'border-red-200 text-red-700 bg-red-50'
+        colorVar: '--red-text',
+        bgVar: '--red-bg',
       };
     case 'warning':
       return {
         label: 'Warning',
         icon: AlertTriangle,
-        textColor: 'text-amber-600',
-        bgColor: 'bg-amber-50',
-        badgeClass: 'border-amber-200 text-amber-700 bg-amber-50'
+        colorVar: '--amber-text',
+        bgVar: '--amber-bg',
       };
     case 'manual':
       return {
         label: 'Manual',
         icon: HelpCircle,
-        textColor: 'text-blue-600',
-        bgColor: 'bg-blue-50',
-        badgeClass: 'border-blue-200 text-blue-700 bg-blue-50'
+        colorVar: '--blue-text',
+        bgVar: '--blue-bg',
       };
     case 'not-applicable':
       return {
         label: 'N/A',
         icon: MinusCircle,
-        textColor: 'text-slate-400',
-        bgColor: 'bg-slate-50',
-        badgeClass: 'border-slate-200 text-slate-500 bg-slate-50'
+        colorVar: '--muted-foreground',
+        bgVar: '--muted',
       };
     default:
       return {
         label: 'Info',
         icon: Info,
-        textColor: 'text-slate-600',
-        bgColor: 'bg-slate-50',
-        badgeClass: 'border-slate-200 text-slate-600 bg-slate-50'
+        colorVar: '--muted-foreground',
+        bgVar: '--muted',
       };
   }
 }

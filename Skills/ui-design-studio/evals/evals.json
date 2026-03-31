@@ -1,0 +1,23 @@
+{
+  "skill_name": "ui-design-studio",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Create a modern SaaS landing page for an AI writing assistant called 'Inkwell'. It should have a hero section, feature grid, testimonials, and a pricing section. Make it dark-themed and premium-looking with smooth animations.",
+      "expected_output": "A complete React JSX or HTML file with dark theme, premium typography, bento-style feature grid, scroll animations, custom easing, double-bezel cards, and no generic AI patterns",
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "Build me a personal portfolio dashboard — something like a creative developer's portfolio with an about section, project showcase cards with hover effects, a skills section, and contact form. Light theme, editorial feel, lots of whitespace.",
+      "expected_output": "A React JSX or HTML file with editorial/warm light theme, asymmetric layout, generous whitespace (py-32+), tilt/hover card effects, scroll reveals, refined typography with serif accents",
+      "files": []
+    },
+    {
+      "id": 3,
+      "prompt": "Design a pricing page component with 3 tiers (Starter, Pro, Enterprise). Include a toggle for monthly/annual billing, feature comparison, and a highlighted 'most popular' tier. Should feel glassmorphic and modern.",
+      "expected_output": "A React component with glass-effect cards, backdrop-blur, animated tier highlight, smooth toggle animation, double-bezel container technique, hover interactions on cards, staggered entry animation",
+      "files": []
+    }
+  ]
+}

@@ -1,0 +1,387 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>PerformancePilot — About</title>
+<link rel="stylesheet" href="shared-styles.css" />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<style>
+  .hero-split {
+    display: grid; grid-template-columns: 340px 1fr; gap: 0;
+    border-radius: 20px; overflow: hidden;
+    background: var(--bg-card); border: 1px solid var(--border);
+    box-shadow: var(--shadow-sm);
+  }
+  .hero-photo {
+    width: 100%; height: 100%; min-height: 420px;
+    object-fit: cover; object-position: center top;
+    display: block;
+  }
+  .hero-info {
+    padding: 40px 36px; display: flex; flex-direction: column; justify-content: center;
+    position: relative;
+  }
+  .hero-info::before {
+    content: ''; position: absolute; top: 0; right: 0; bottom: 0; left: 0;
+    background: radial-gradient(ellipse at top right, color-mix(in srgb, var(--blue-text) 6%, transparent) 0%, transparent 60%);
+    pointer-events: none;
+  }
+  .role-badge {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 5px 14px; border-radius: 20px; font-size: 11px; font-weight: 700;
+    background: var(--blue-bg); color: var(--blue-text);
+    letter-spacing: 0.04em; text-transform: uppercase; width: fit-content;
+  }
+  .hero-name {
+    font-size: 36px; font-weight: 900; letter-spacing: -0.04em;
+    color: var(--text-heading); line-height: 1.1; margin-top: 16px;
+  }
+  .hero-title {
+    font-size: 16px; font-weight: 500; color: var(--blue-text); margin-top: 8px;
+  }
+  .hero-meta {
+    display: flex; flex-wrap: wrap; gap: 16px; margin-top: 16px;
+  }
+  .hero-meta-item {
+    display: flex; align-items: center; gap: 5px;
+    font-size: 13px; color: var(--text-muted);
+  }
+  .stat-grid {
+    display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-top: 28px;
+    position: relative; z-index: 1;
+  }
+  .stat-box {
+    text-align: center; padding: 14px 8px; border-radius: 12px;
+    background: color-mix(in srgb, var(--accent) 5%, transparent);
+    border: 1px solid var(--border-light);
+  }
+  .stat-value { font-family: 'JetBrains Mono', monospace; font-size: 24px; font-weight: 800; color: var(--text-heading); }
+  .stat-label { font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.1em; color: var(--text-faint); margin-top: 4px; }
+  .skill-pill {
+    display: inline-flex; align-items: center; gap: 4px;
+    padding: 5px 14px; border-radius: 20px; font-size: 11px; font-weight: 600;
+    background: color-mix(in srgb, var(--accent) 5%, transparent);
+    border: 1px solid var(--border-light);
+    color: var(--text-muted); transition: all 0.2s;
+  }
+  .skill-pill:hover { background: color-mix(in srgb, var(--accent) 12%, transparent); color: var(--text-heading); transform: translateY(-1px); }
+  .skill-pill.ai {
+    background: var(--indigo-bg); border-color: color-mix(in srgb, var(--indigo-text) 20%, transparent);
+    color: var(--indigo-text);
+  }
+  .skill-pill.ai:hover { background: color-mix(in srgb, var(--indigo-text) 20%, transparent); }
+  .exp-timeline { position: relative; padding-left: 28px; }
+  .exp-timeline::before {
+    content: ''; position: absolute; left: 7px; top: 8px; bottom: -12px; width: 1px;
+    background: var(--border);
+  }
+  .exp-timeline:last-child::before { bottom: 8px; }
+  .exp-dot {
+    position: absolute; left: 0; top: 6px;
+    width: 15px; height: 15px; border-radius: 50%;
+    border: 2px solid var(--border); background: var(--bg-card);
+  }
+  .exp-dot.current { border-color: var(--blue-text); background: var(--blue-bg); box-shadow: 0 0 0 4px color-mix(in srgb, var(--blue-text) 12%, transparent); }
+  .contact-card {
+    display: flex; align-items: center; gap: 12px;
+    padding: 14px 18px; border-radius: 14px;
+    background: color-mix(in srgb, var(--accent) 3%, transparent);
+    border: 1px solid var(--border-light);
+    text-decoration: none; color: var(--text-body);
+    transition: all 0.25s cubic-bezier(0.16,1,0.3,1);
+  }
+  .contact-card:hover {
+    background: color-mix(in srgb, var(--accent) 8%, transparent);
+    border-color: var(--border); transform: translateY(-2px);
+    box-shadow: var(--shadow-md);
+  }
+  .contact-icon {
+    width: 40px; height: 40px; border-radius: 10px;
+    display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+  }
+  .section-label {
+    font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.1em;
+    color: var(--text-faint); margin-bottom: 20px;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .section-label::after { content: ''; flex: 1; height: 1px; background: var(--border-light); }
+  .skill-category {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 5px 14px; border-radius: 20px; font-size: 10px; font-weight: 700;
+    background: var(--blue-bg); color: var(--blue-text);
+    letter-spacing: 0.06em; text-transform: uppercase;
+    margin-bottom: 10px; margin-top: 18px;
+  }
+  .skill-category:first-child { margin-top: 0; }
+</style>
+</head>
+<body>
+  <!-- NAVBAR -->
+  <nav class="sticky-bar" style="top:0;"><div class="navbar">
+    <div style="display:flex;align-items:center;gap:32px;">
+      <a href="1-navbar-dashboard.html" style="display:flex;align-items:center;gap:8px;text-decoration:none;">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="1.5"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+        <span class="t-heading" style="font-weight:600;font-size:15px;letter-spacing:-0.02em;">PerformancePilot</span>
+      </a>
+      <div style="display:flex;gap:24px;">
+        <a href="#" class="nav-link t-muted" style="font-size:14px;font-weight:500;">Dashboard</a>
+        <a href="#" class="nav-link t-muted" style="font-size:14px;font-weight:500;">New Audit</a>
+      </div>
+    </div>
+    <div style="display:flex;align-items:center;gap:12px;">
+      <button class="theme-toggle" onclick="toggleTheme()"></button>
+    </div>
+  </div></nav>
+
+  <main style="max-width:960px;margin:0 auto;padding:40px 24px 80px;">
+
+    <!-- ═══════════════════ HERO: Photo + Info Split ═══════════════════ -->
+    <div class="reveal hero-split" style="margin-bottom:28px;">
+      <img src="yogesh-mohite.jpg" alt="Yogesh Mohite" class="hero-photo" />
+      <div class="hero-info">
+        <div style="position:relative;z-index:1;">
+          <div class="role-badge">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/></svg>
+            Senior Quality Analyst
+          </div>
+          <h1 class="hero-name">Yogesh Mohite</h1>
+          <p class="hero-title">QA Engineer &middot; AI Enthusiast &middot; Test Automation Engineer</p>
+          <div class="hero-meta">
+            <span class="hero-meta-item">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/></svg>
+              Pune, India
+            </span>
+            <span class="hero-meta-item">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2"/></svg>
+              Iksula Services Pvt. Ltd.
+            </span>
+            <span class="hero-meta-item">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+              6+ Years
+            </span>
+          </div>
+          <!-- Stats -->
+          <div class="stat-grid">
+            <div class="stat-box"><div class="stat-value">6+</div><div class="stat-label">Years Exp.</div></div>
+            <div class="stat-box"><div class="stat-value">4</div><div class="stat-label">Companies</div></div>
+            <div class="stat-box"><div class="stat-value">15+</div><div class="stat-label">Tools</div></div>
+            <div class="stat-box"><div class="stat-value">ME</div><div class="stat-label">Education</div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══════════════════ CONTENT: 2-Column Grid ═══════════════════ -->
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;">
+
+      <!-- ──── LEFT COLUMN ──── -->
+      <div style="display:flex;flex-direction:column;gap:24px;">
+
+        <!-- About -->
+        <div class="reveal card-static" style="padding:28px;">
+          <div class="section-label">About</div>
+          <p class="t-body" style="font-size:14px;line-height:1.75;">
+            Senior Quality Analyst with 6+ years of hands-on experience in software testing, specializing in
+            automation frameworks, web application testing, and <strong style="color:var(--text-heading);">AI-driven quality assurance</strong>.
+            Deep expertise across e-commerce platforms (Magento, Shopify, WordPress), big data pipelines, and performance engineering.
+          </p>
+          <p class="t-body" style="font-size:14px;line-height:1.75;margin-top:14px;">
+            Currently building <strong style="color:var(--text-heading);">PerformancePilot</strong> &mdash; an AI-powered performance audit agent
+            that automates Core Web Vitals analysis using the PageSpeed Insights API, providing actionable insights through
+            intelligent metric comparison and diagnostic reporting.
+          </p>
+          <p class="t-body" style="font-size:14px;line-height:1.75;margin-top:14px;">
+            Passionate about leveraging <strong style="color:var(--text-heading);">Generative AI, LLMs, and multi-agent systems</strong>
+            to transform software testing and quality engineering workflows.
+          </p>
+        </div>
+
+        <!-- Experience -->
+        <div class="reveal card-static" style="padding:28px;">
+          <div class="section-label">Experience</div>
+          <div style="display:flex;flex-direction:column;gap:22px;">
+            <div class="exp-timeline">
+              <div class="exp-dot current"></div>
+              <div>
+                <div style="display:flex;align-items:center;gap:8px;margin-bottom:3px;">
+                  <h3 class="t-heading" style="font-size:14px;font-weight:700;">Senior Quality Analyst</h3>
+                  <span class="status-badge" style="background:var(--blue-bg);color:var(--blue-text);font-size:9px;padding:2px 8px;border-radius:4px;">CURRENT</span>
+                </div>
+                <p class="t-muted" style="font-size:13px;font-weight:600;">Iksula Services Pvt. Ltd.</p>
+                <p class="t-faint" style="font-size:11px;margin-top:2px;">May 2025 &ndash; Present &middot; 11 mos</p>
+                <p class="t-faint" style="font-size:11px;margin-top:3px;line-height:1.5;">E-commerce performance audits, AI-powered testing agents, automation framework architecture</p>
+              </div>
+            </div>
+            <div class="exp-timeline">
+              <div class="exp-dot"></div>
+              <div>
+                <h3 class="t-heading" style="font-size:14px;font-weight:700;">QA Engineer</h3>
+                <p class="t-muted" style="font-size:13px;font-weight:600;">Benzy Infotech Pvt. Ltd.</p>
+                <p class="t-faint" style="font-size:11px;margin-top:2px;">Mar 2024 &ndash; May 2025 &middot; 1 yr 3 mos</p>
+                <p class="t-faint" style="font-size:11px;margin-top:3px;line-height:1.5;">Web application testing, manual & automation testing</p>
+              </div>
+            </div>
+            <div class="exp-timeline">
+              <div class="exp-dot"></div>
+              <div>
+                <h3 class="t-heading" style="font-size:14px;font-weight:700;">QA Analyst</h3>
+                <p class="t-muted" style="font-size:13px;font-weight:600;">Elsner Technologies Pvt. Ltd.</p>
+                <p class="t-faint" style="font-size:11px;margin-top:2px;">Aug 2022 &ndash; Mar 2024 &middot; 1 yr 8 mos</p>
+                <p class="t-faint" style="font-size:11px;margin-top:3px;line-height:1.5;">Selenium WebDriver, TestNG, regression testing, CI/CD integration</p>
+              </div>
+            </div>
+            <div class="exp-timeline">
+              <div class="exp-dot"></div>
+              <div>
+                <h3 class="t-heading" style="font-size:14px;font-weight:700;">Software Tester</h3>
+                <p class="t-muted" style="font-size:13px;font-weight:600;">Intelligic Software Pvt. Ltd.</p>
+                <p class="t-faint" style="font-size:11px;margin-top:2px;">Jan 2020 &ndash; Aug 2022 &middot; 2 yrs 8 mos</p>
+                <p class="t-faint" style="font-size:11px;margin-top:3px;line-height:1.5;">Foundation in software quality assurance</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Education -->
+        <div class="reveal card-static" style="padding:28px;">
+          <div class="section-label">Education</div>
+          <div style="display:flex;align-items:center;gap:16px;">
+            <div style="width:48px;height:48px;border-radius:12px;background:var(--indigo-bg);display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--indigo-text)" stroke-width="1.5"><path d="m4 6 8-4 8 4"/><path d="m18 10 4 2v6"/><path d="M14 22v-4a2 2 0 0 0-2-2 2 2 0 0 0-2 2v4"/><path d="M18 10v12"/><path d="M6 10v12"/><path d="m2 12 4-2"/><path d="M2 12v6"/></svg>
+            </div>
+            <div>
+              <h3 class="t-heading" style="font-size:14px;font-weight:700;">Master of Engineering (ME)</h3>
+              <p class="t-muted" style="font-size:13px;">Mechanical Drafting CAD/CADD</p>
+              <p class="t-faint" style="font-size:12px;margin-top:2px;">Shivaji University &middot; 2011 &ndash; 2014</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ──── RIGHT COLUMN ──── -->
+      <div style="display:flex;flex-direction:column;gap:24px;">
+
+        <!-- Skills -->
+        <div class="reveal card-static" style="padding:28px;">
+          <div class="section-label">Skills & Expertise</div>
+
+          <p class="skill-category" style="margin-top:0;">AI & Generative AI</p>
+          <div style="display:flex;flex-wrap:wrap;gap:6px;">
+            <span class="skill-pill">LLM</span>
+            <span class="skill-pill">GenAI</span>
+            <span class="skill-pill">RAG</span>
+            <span class="skill-pill">LangChain</span>
+            <span class="skill-pill">LangGraph</span>
+            <span class="skill-pill">CrewAI</span>
+            <span class="skill-pill">DeepEval</span>
+            <span class="skill-pill">AI Agents</span>
+            <span class="skill-pill">Multi-Agent Systems</span>
+            <span class="skill-pill">SKILL.md Creation</span>
+          </div>
+
+          <p class="skill-category">Testing & Automation</p>
+          <div style="display:flex;flex-wrap:wrap;gap:6px;">
+            <span class="skill-pill">Selenium WebDriver</span>
+            <span class="skill-pill">TestNG</span>
+            <span class="skill-pill">API Testing</span>
+            <span class="skill-pill">Regression Testing</span>
+            <span class="skill-pill">Performance Testing</span>
+            <span class="skill-pill">Manual Testing</span>
+          </div>
+
+          <p class="skill-category">Platforms</p>
+          <div style="display:flex;flex-wrap:wrap;gap:6px;">
+            <span class="skill-pill">Magento</span>
+            <span class="skill-pill">WordPress</span>
+            <span class="skill-pill">Shopify</span>
+          </div>
+
+          <p class="skill-category">DevOps & Tools</p>
+          <div style="display:flex;flex-wrap:wrap;gap:6px;">
+            <span class="skill-pill">GitHub</span>
+            <span class="skill-pill">Jenkins</span>
+            <span class="skill-pill">Docker</span>
+            <span class="skill-pill">Selenoid Grid</span>
+            <span class="skill-pill">AWS</span>
+            <span class="skill-pill">JIRA</span>
+          </div>
+
+          <p class="skill-category">Programming & Data</p>
+          <div style="display:flex;flex-wrap:wrap;gap:6px;">
+            <span class="skill-pill">Java</span>
+            <span class="skill-pill">Python</span>
+            <span class="skill-pill">SQL</span>
+            <span class="skill-pill">ADF</span>
+            <span class="skill-pill">Databricks</span>
+            <span class="skill-pill">PySpark</span>
+          </div>
+        </div>
+
+        <!-- Contact -->
+        <div class="reveal card-static" style="padding:28px;">
+          <div class="section-label">Contact</div>
+          <div style="display:flex;flex-direction:column;gap:10px;">
+            <a href="https://www.linkedin.com/in/yogesh-mohite/" target="_blank" class="contact-card">
+              <div class="contact-icon" style="background:var(--blue-bg);">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="var(--blue-text)"><path d="M20.447 20.452h-3.554v-5.569c0-1.328-.027-3.037-1.852-3.037-1.853 0-2.136 1.445-2.136 2.939v5.667H9.351V9h3.414v1.561h.046c.477-.9 1.637-1.85 3.37-1.85 3.601 0 4.267 2.37 4.267 5.455v6.286zM5.337 7.433c-1.144 0-2.063-.926-2.063-2.065 0-1.138.92-2.063 2.063-2.063 1.14 0 2.064.925 2.064 2.063 0 1.139-.925 2.065-2.064 2.065zm1.782 13.019H3.555V9h3.564v11.452zM22.225 0H1.771C.792 0 0 .774 0 1.729v20.542C0 23.227.792 24 1.771 24h20.451C23.2 24 24 23.227 24 22.271V1.729C24 .774 23.2 0 22.222 0h.003z"/></svg>
+              </div>
+              <div style="flex:1;">
+                <span class="t-heading" style="font-size:13px;font-weight:600;">LinkedIn</span>
+                <p class="t-faint" style="font-size:11px;">/in/yogesh-mohite</p>
+              </div>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--text-faint)" stroke-width="1.5"><path d="M7 17 17 7"/><path d="M7 7h10v10"/></svg>
+            </a>
+            <a href="mailto:yogesh.ybm999@gmail.com" class="contact-card">
+              <div class="contact-icon" style="background:var(--green-bg);">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--green-text)" stroke-width="1.5"><rect width="20" height="16" x="2" y="4" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/></svg>
+              </div>
+              <div style="flex:1;">
+                <span class="t-heading" style="font-size:13px;font-weight:600;">Email</span>
+                <p class="t-faint" style="font-size:11px;">yogesh.ybm999@gmail.com</p>
+              </div>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--text-faint)" stroke-width="1.5"><path d="M7 17 17 7"/><path d="M7 7h10v10"/></svg>
+            </a>
+            <a href="tel:+917709708993" class="contact-card">
+              <div class="contact-icon" style="background:var(--amber-bg);">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--amber-text)" stroke-width="1.5"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/></svg>
+              </div>
+              <div style="flex:1;">
+                <span class="t-heading" style="font-size:13px;font-weight:600;">Phone</span>
+                <p class="t-faint" style="font-size:11px;">+91 7709708993</p>
+              </div>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--text-faint)" stroke-width="1.5"><path d="M7 17 17 7"/><path d="M7 7h10v10"/></svg>
+            </a>
+            <a href="https://github.com/yogeshcodeshare" target="_blank" class="contact-card">
+              <div class="contact-icon" style="background:color-mix(in srgb, var(--accent) 8%, transparent);">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="var(--text-muted)"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
+              </div>
+              <div style="flex:1;">
+                <span class="t-heading" style="font-size:13px;font-weight:600;">GitHub</span>
+                <p class="t-faint" style="font-size:11px;">yogeshcodeshare</p>
+              </div>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--text-faint)" stroke-width="1.5"><path d="M7 17 17 7"/><path d="M7 7h10v10"/></svg>
+            </a>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Footer -->
+    <div class="reveal" style="margin-top:48px;text-align:center;padding:24px;">
+      <p class="t-faint" style="font-size:12px;">Built with Next.js, TypeScript & the PageSpeed Insights API</p>
+      <p class="t-faint" style="font-size:11px;margin-top:4px;">PerformancePilot v1.6.0</p>
+    </div>
+  </main>
+
+  <script>
+    function toggleTheme() {
+      const html = document.documentElement;
+      html.dataset.theme = html.dataset.theme === 'dark' ? 'light' : 'dark';
+    }
+    const observer = new IntersectionObserver(entries => {
+      entries.forEach(e => { if (e.isIntersecting) { e.target.classList.add('visible'); observer.unobserve(e.target); } });
+    }, { threshold: 0.1 });
+    document.querySelectorAll('.reveal').forEach(el => observer.observe(el));
+  </script>
+</body>
+</html>

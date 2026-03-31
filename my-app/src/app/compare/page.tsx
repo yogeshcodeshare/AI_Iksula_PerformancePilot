@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -14,18 +14,16 @@ import {
   TableHeader,
   TableRow
 } from '@/components/ui/table';
-import { ReportPackage, ComparisonResult, ComparisonDelta, CategoryScoreDelta, CategoryName } from '@/types';
+import { ReportPackage, ComparisonResult, ComparisonDelta, CategoryScoreDelta, CategoryName, Device } from '@/types';
 import {
   compareReports,
   generateComparisonSummary,
   getSignificantChanges,
   getSignificantCategoryChanges
 } from '@/services/comparison';
-import { getBaselineReport, getAuditStateAsync } from '@/services/storage';
+import { getBaselineReportAsync, getAuditStateAsync } from '@/services/storage';
 import { formatMetricValue, formatDate, calculateOverallHealth, cn } from '@/lib/utils';
 import {
-  ArrowLeft,
-  Download,
   TrendingUp,
   TrendingDown,
   Minus,
@@ -36,8 +34,10 @@ import {
   ShieldCheck,
   Search,
   Activity,
-  Calendar,
-  Target
+  Smartphone,
+  Monitor,
+  ChevronDown,
+  FileText
 } from 'lucide-react';
 import Link from 'next/link';
 import jsPDF from 'jspdf';
@@ -50,11 +50,13 @@ export default function ComparePage() {
   const [baseline, setBaseline] = useState<ReportPackage | null>(null);
   const [current, setCurrent] = useState<ReportPackage | null>(null);
   const [comparison, setComparison] = useState<ComparisonResult | null>(null);
+  const [selectedDevice, setSelectedDevice] = useState<Device>('mobile');
+  const [selectedPage, setSelectedPage] = useState<string>('all');
 
   useEffect(() => {
-    const storedBaseline = getBaselineReport();
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    if (storedBaseline) setBaseline(storedBaseline);
+    getBaselineReportAsync().then(storedBaseline => {
+      if (storedBaseline) setBaseline(storedBaseline);
+    });
 
     async function loadCurrent() {
       let currentAudit = null;
@@ -91,15 +93,44 @@ export default function ComparePage() {
     if (baseline && current) setComparison(compareReports(baseline, current));
   }, [baseline, current]);
 
+  // Unique page labels from comparison
+  const pageLabels = useMemo(() => {
+    if (!comparison) return [];
+    const labels = new Set(comparison.deltas.map(d => d.pageKey));
+    return Array.from(labels);
+  }, [comparison]);
+
+  // Filter comparison data by selected device and page
+  const filteredComparison = useMemo(() => {
+    if (!comparison) return null;
+    return {
+      ...comparison,
+      deltas: comparison.deltas.filter(d =>
+        d.device === selectedDevice && (selectedPage === 'all' || d.pageKey === selectedPage)
+      ),
+      categoryScoreDeltas: comparison.categoryScoreDeltas.filter(d =>
+        d.device === selectedDevice && (selectedPage === 'all' || d.pageKey === selectedPage)
+      ),
+    };
+  }, [comparison, selectedDevice, selectedPage]);
+
+  // Get page IDs matching selected page filter
+  const selectedPageIds = useMemo(() => {
+    if (!baseline || !current || selectedPage === 'all') return null;
+    const baselinePageIds = baseline.pages.filter(p => p.pageLabel === selectedPage).map(p => p.pageId);
+    const currentPageIds = current.pages.filter(p => p.pageLabel === selectedPage).map(p => p.pageId);
+    return { baseline: baselinePageIds, current: currentPageIds };
+  }, [selectedPage, baseline, current]);
+
   if (!baseline || !current) {
     return (
-      <div className="min-h-screen bg-slate-50 flex items-center justify-center">
+      <div className="min-h-screen bg-background flex items-center justify-center">
         <div className="text-center max-w-sm">
-          <AlertCircle className="h-12 w-12 text-slate-300 mx-auto mb-4" />
-          <p className="text-slate-700 font-medium mb-2">
+          <AlertCircle className="h-12 w-12 text-muted-foreground/50 mx-auto mb-4" />
+          <p className="text-foreground font-medium mb-2">
             {!baseline ? 'No baseline report loaded' : 'No current audit found'}
           </p>
-          <p className="text-sm text-slate-500 mb-6">
+          <p className="text-sm text-muted-foreground mb-6">
             {!baseline
               ? 'Upload a previous audit JSON from the Results page to compare.'
               : 'Run a new audit first, then return here to compare.'}
@@ -112,25 +143,29 @@ export default function ComparePage() {
     );
   }
 
-  if (!comparison) {
+  if (!comparison || !filteredComparison) {
     return (
-      <div className="min-h-screen bg-slate-50 flex items-center justify-center">
+      <div className="min-h-screen bg-background flex items-center justify-center">
         <div className="text-center">
-          <div className="animate-spin h-8 w-8 border-2 border-slate-800 border-t-transparent rounded-full mx-auto mb-3" />
-          <p className="text-slate-500 text-sm">Comparing reports...</p>
+          <div className="animate-spin h-8 w-8 border-2 border-primary border-t-transparent rounded-full mx-auto mb-3" />
+          <p className="text-muted-foreground text-sm">Comparing reports...</p>
         </div>
       </div>
     );
   }
 
-  const summary = generateComparisonSummary(comparison);
-  const regressions = getSignificantChanges(comparison, 'regressed');
-  const improvements = getSignificantChanges(comparison, 'improved');
-  const categoryRegressions = getSignificantCategoryChanges(comparison, 'regressed');
-  const categoryImprovements = getSignificantCategoryChanges(comparison, 'improved');
+  const summary = generateComparisonSummary(filteredComparison);
+  const regressions = getSignificantChanges(filteredComparison, 'regressed');
+  const improvements = getSignificantChanges(filteredComparison, 'improved');
+  const categoryRegressions = getSignificantCategoryChanges(filteredComparison, 'regressed');
+  const categoryImprovements = getSignificantCategoryChanges(filteredComparison, 'improved');
 
-  const baselineHealth = calculateOverallHealth(baseline.metrics);
-  const currentHealth = calculateOverallHealth(current.metrics);
+  const baselineHealth = calculateOverallHealth(
+    baseline.metrics.filter(m => m.device === selectedDevice && (!selectedPageIds || selectedPageIds.baseline.includes(m.pageId)))
+  );
+  const currentHealth = calculateOverallHealth(
+    current.metrics.filter(m => m.device === selectedDevice && (!selectedPageIds || selectedPageIds.current.includes(m.pageId)))
+  );
   const healthDelta = currentHealth - baselineHealth;
 
   const handleDownloadComparisonPDF = () => {
@@ -182,113 +217,144 @@ export default function ComparePage() {
     doc.text(formatDate(comparison.currentRun.generatedAt), MARGIN + CONTENT_W / 2 + 7, y + 19);
     y += 30;
 
-    // ── Summary stats ─────────────────────────────────────────────────────────
-    setFont(11, 'bold', [15, 23, 42]);
-    doc.text('Comparison Summary', MARGIN, y);
-    y += 6;
+    // ── Per-device sections (Mobile then Desktop) ──────────────────────────────
+    const devices: Device[] = ['mobile', 'desktop'];
+    for (const device of devices) {
+      const devDeltas = comparison.deltas.filter(d => d.device === device);
+      const devCatDeltas = comparison.categoryScoreDeltas.filter(d => d.device === device);
+      const devSummary = generateComparisonSummary({ ...comparison, deltas: devDeltas, categoryScoreDeltas: devCatDeltas });
+      const devRegressions = devDeltas.filter(d => d.deltaDirection === 'regressed').sort((a, b) => b.deltaValue - a.deltaValue);
+      const devImprovements = devDeltas.filter(d => d.deltaDirection === 'improved').sort((a, b) => b.deltaValue - a.deltaValue);
+      const devBaselineHealth = calculateOverallHealth(baseline.metrics.filter(m => m.device === device));
+      const devCurrentHealth = calculateOverallHealth(current.metrics.filter(m => m.device === device));
+      const devHealthDelta = devCurrentHealth - devBaselineHealth;
 
-    const cols = CONTENT_W / 4;
-    const statItems = [
-      { label: 'Compared', value: String(summary.totalCompared), color: [30, 41, 59] as [number,number,number] },
-      { label: 'Improved', value: String(summary.improved), color: [21, 128, 61] as [number,number,number] },
-      { label: 'Regressed', value: String(summary.regressed), color: [185, 28, 28] as [number,number,number] },
-      { label: 'Unchanged', value: String(summary.unchanged), color: [71, 85, 105] as [number,number,number] },
-    ];
-    statItems.forEach((s, i) => {
-      filledRect(MARGIN + i * cols, y, cols - 3, 18, 248, 250, 252);
-      setFont(7, 'bold', [100, 116, 139]);
-      doc.text(s.label.toUpperCase(), MARGIN + i * cols + 4, y + 6);
-      setFont(14, 'bold', s.color);
-      doc.text(s.value, MARGIN + i * cols + 4, y + 15);
-    });
-    y += 26;
+      // Device section header
+      filledRect(MARGIN, y, CONTENT_W, 10, 30, 41, 59);
+      setFont(9, 'bold', [255, 255, 255]);
+      doc.text(`${device.toUpperCase()} RESULTS`, MARGIN + 4, y + 7);
+      const devHealthColor: [number, number, number] = devHealthDelta > 0 ? [74, 222, 128] : devHealthDelta < 0 ? [248, 113, 113] : [200, 200, 200];
+      setFont(8, 'bold', devHealthColor);
+      doc.text(`Health: ${devCurrentHealth}% (${devHealthDelta > 0 ? '+' : ''}${devHealthDelta}%)`, CONTENT_W - 10, y + 7, { align: 'right' });
+      y += 16;
 
-    // ── Metric regressions table ──────────────────────────────────────────────
-    if (regressions.length > 0) {
-      setFont(10, 'bold', [15, 23, 42]);
-      doc.text('Metric Regressions', MARGIN, y);
-      y += 4;
-      autoTable(doc, {
-        startY: y,
-        margin: { left: MARGIN, right: MARGIN },
-        head: [['Page', 'Metric', 'Device', 'Baseline', 'Current', 'Delta']],
-        body: regressions.slice(0, 15).map(r => [
-          r.pageKey,
-          r.metricName,
-          r.device === 'mobile' ? 'Mobile' : 'Desktop',
-          formatMetricValue(r.baselineValue, r.metricName),
-          formatMetricValue(r.currentValue, r.metricName),
-          `+${formatMetricValue(r.deltaValue, r.metricName)}`
-        ]),
-        headStyles: { fillColor: [185, 28, 28], fontSize: 8, fontStyle: 'bold', textColor: [255, 255, 255] },
-        bodyStyles: { fontSize: 8, cellPadding: 2.5 },
-        columnStyles: { 0: { fontStyle: 'bold' }, 5: { fontStyle: 'bold', textColor: [185, 28, 28] } },
-        alternateRowStyles: { fillColor: [254, 242, 242] }
+      // Summary stats row
+      const cols = CONTENT_W / 4;
+      const statItems = [
+        { label: 'Compared', value: String(devSummary.totalCompared), color: [30, 41, 59] as [number,number,number] },
+        { label: 'Improved', value: String(devSummary.improved), color: [21, 128, 61] as [number,number,number] },
+        { label: 'Regressed', value: String(devSummary.regressed), color: [185, 28, 28] as [number,number,number] },
+        { label: 'Unchanged', value: String(devSummary.unchanged), color: [71, 85, 105] as [number,number,number] },
+      ];
+      statItems.forEach((s, i) => {
+        const boxX = MARGIN + i * cols;
+        const boxW = cols - 3;
+        const centerX = boxX + boxW / 2;
+        filledRect(boxX, y, boxW, 16, 248, 250, 252);
+        setFont(7, 'bold', [100, 116, 139]);
+        doc.text(s.label.toUpperCase(), centerX, y + 5, { align: 'center' });
+        setFont(12, 'bold', s.color);
+        doc.text(s.value, centerX, y + 13, { align: 'center' });
       });
-      y = (doc as unknown as AutoTableDoc).lastAutoTable.finalY + 10;
-    }
+      y += 22;
 
-    // ── Metric improvements table ─────────────────────────────────────────────
-    if (improvements.length > 0) {
-      if (y > 220) { doc.addPage(); y = 20; }
-      setFont(10, 'bold', [15, 23, 42]);
-      doc.text('Metric Improvements', MARGIN, y);
-      y += 4;
-      autoTable(doc, {
-        startY: y,
-        margin: { left: MARGIN, right: MARGIN },
-        head: [['Page', 'Metric', 'Device', 'Baseline', 'Current', 'Delta']],
-        body: improvements.slice(0, 15).map(r => [
-          r.pageKey,
-          r.metricName,
-          r.device === 'mobile' ? 'Mobile' : 'Desktop',
-          formatMetricValue(r.baselineValue, r.metricName),
-          formatMetricValue(r.currentValue, r.metricName),
-          `-${formatMetricValue(r.deltaValue, r.metricName)}`
-        ]),
-        headStyles: { fillColor: [21, 128, 61], fontSize: 8, fontStyle: 'bold', textColor: [255, 255, 255] },
-        bodyStyles: { fontSize: 8, cellPadding: 2.5 },
-        columnStyles: { 0: { fontStyle: 'bold' }, 5: { fontStyle: 'bold', textColor: [21, 128, 61] } },
-        alternateRowStyles: { fillColor: [240, 253, 244] }
-      });
-      y = (doc as unknown as AutoTableDoc).lastAutoTable.finalY + 10;
-    }
+      // All metrics table
+      if (devDeltas.length > 0) {
+        setFont(9, 'bold', [15, 23, 42]);
+        doc.text('All Metrics', MARGIN, y);
+        y += 4;
+        autoTable(doc, {
+          startY: y,
+          margin: { left: MARGIN, right: MARGIN },
+          head: [['Page', 'Metric', 'Baseline', 'Current', 'Delta', 'Trend']],
+          body: devDeltas.map(r => [
+            r.pageKey,
+            r.metricName,
+            formatMetricValue(r.baselineValue, r.metricName),
+            formatMetricValue(r.currentValue, r.metricName),
+            `${r.deltaDirection === 'improved' ? '−' : r.deltaDirection === 'regressed' ? '+' : '±'}${formatMetricValue(r.deltaValue, r.metricName)}`,
+            r.deltaDirection.charAt(0).toUpperCase() + r.deltaDirection.slice(1)
+          ]),
+          headStyles: { fillColor: [15, 23, 42], fontSize: 8, fontStyle: 'bold', halign: 'center', valign: 'middle' },
+          bodyStyles: { fontSize: 8, cellPadding: 3, valign: 'middle', lineWidth: 0.2, lineColor: [226, 232, 240] },
+          columnStyles: {
+            0: { fontStyle: 'bold', halign: 'left' },
+            1: { halign: 'center' },
+            2: { halign: 'center' },
+            3: { halign: 'center' },
+            4: { halign: 'center' },
+            5: { halign: 'center' }
+          },
+          tableLineWidth: 0.2,
+          tableLineColor: [226, 232, 240],
+          didParseCell: (data) => {
+            if (data.section !== 'body' || data.column.index !== 5) return;
+            const val = String(data.cell.raw);
+            if (val === 'Improved') {
+              data.cell.styles.textColor = [21, 128, 61];
+              data.cell.styles.fontStyle = 'bold';
+            } else if (val === 'Regressed') {
+              data.cell.styles.textColor = [185, 28, 28];
+              data.cell.styles.fontStyle = 'bold';
+            } else {
+              data.cell.styles.textColor = [100, 116, 139];
+            }
+          },
+          alternateRowStyles: { fillColor: [248, 250, 252] }
+        });
+        y = (doc as unknown as AutoTableDoc).lastAutoTable.finalY + 8;
+      }
 
-    // ── Category score changes ─────────────────────────────────────────────────
-    if (comparison.categoryScoreDeltas.length > 0) {
-      if (y > 220) { doc.addPage(); y = 20; }
-      setFont(10, 'bold', [15, 23, 42]);
-      doc.text('Category Score Shifts', MARGIN, y);
-      y += 4;
-      autoTable(doc, {
-        startY: y,
-        margin: { left: MARGIN, right: MARGIN },
-        head: [['Page', 'Category', 'Device', 'Baseline', 'Current', 'Delta', 'Direction']],
-        body: [...categoryRegressions, ...categoryImprovements].slice(0, 20).map(c => [
-          c.pageKey,
-          c.category.replace(/-/g, ' '),
-          c.device === 'mobile' ? 'Mobile' : 'Desktop',
-          String(c.baselineScore),
-          String(c.currentScore),
-          `${c.delta > 0 ? '+' : ''}${c.delta}`,
-          c.deltaDirection === 'improved' ? 'Improved' : 'Regressed'
-        ]),
-        headStyles: { fillColor: [15, 23, 42], fontSize: 8, fontStyle: 'bold' },
-        bodyStyles: { fontSize: 8, cellPadding: 2.5 },
-        columnStyles: { 0: { fontStyle: 'bold' } },
-        didParseCell: (data) => {
-          if (data.section !== 'body' || data.column.index !== 6) return;
-          const val = String(data.cell.raw);
-          if (val === 'Improved') {
-            data.cell.styles.textColor = [21, 128, 61];
-            data.cell.styles.fontStyle = 'bold';
-          } else if (val === 'Regressed') {
-            data.cell.styles.textColor = [185, 28, 28];
-            data.cell.styles.fontStyle = 'bold';
-          }
-        },
-        alternateRowStyles: { fillColor: [248, 250, 252] }
-      });
+      // Category scores table
+      if (devCatDeltas.length > 0) {
+        if (y > 220) { doc.addPage(); y = 20; }
+        setFont(9, 'bold', [15, 23, 42]);
+        doc.text('Category Scores', MARGIN, y);
+        y += 4;
+        autoTable(doc, {
+          startY: y,
+          margin: { left: MARGIN, right: MARGIN },
+          head: [['Page', 'Category', 'Baseline', 'Current', 'Delta', 'Trend']],
+          body: devCatDeltas.map(c => [
+            c.pageKey,
+            c.category.replace(/-/g, ' '),
+            String(c.baselineScore),
+            String(c.currentScore),
+            `${c.deltaDirection === 'improved' ? '+' : c.deltaDirection === 'regressed' ? '' : '±'}${c.delta}`,
+            c.deltaDirection.charAt(0).toUpperCase() + c.deltaDirection.slice(1)
+          ]),
+          headStyles: { fillColor: [15, 23, 42], fontSize: 8, fontStyle: 'bold', halign: 'center', valign: 'middle' },
+          bodyStyles: { fontSize: 8, cellPadding: 3, valign: 'middle', lineWidth: 0.2, lineColor: [226, 232, 240] },
+          columnStyles: {
+            0: { fontStyle: 'bold', halign: 'left' },
+            1: { halign: 'left' },
+            2: { halign: 'center' },
+            3: { halign: 'center' },
+            4: { halign: 'center' },
+            5: { halign: 'center' }
+          },
+          tableLineWidth: 0.2,
+          tableLineColor: [226, 232, 240],
+          didParseCell: (data) => {
+            if (data.section !== 'body' || data.column.index !== 5) return;
+            const val = String(data.cell.raw);
+            if (val === 'Improved') {
+              data.cell.styles.textColor = [21, 128, 61];
+              data.cell.styles.fontStyle = 'bold';
+            } else if (val === 'Regressed') {
+              data.cell.styles.textColor = [185, 28, 28];
+              data.cell.styles.fontStyle = 'bold';
+            } else {
+              data.cell.styles.textColor = [100, 116, 139];
+            }
+          },
+          alternateRowStyles: { fillColor: [248, 250, 252] }
+        });
+        y = (doc as unknown as AutoTableDoc).lastAutoTable.finalY + 8;
+      }
+
+      // Page break between mobile and desktop
+      if (device === 'mobile') { doc.addPage(); y = 20; }
     }
 
     // ── Footer ────────────────────────────────────────────────────────────────
@@ -307,230 +373,294 @@ export default function ComparePage() {
   };
 
   return (
-    <div className="bg-slate-50 min-h-[calc(100vh-4rem)]">
-      {/* Header */}
-      <header className="bg-white border-b border-slate-200 sticky top-0 z-40">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <Link href="/results">
-                <Button variant="ghost" size="icon" className="text-slate-500 hover:text-slate-900">
-                  <ArrowLeft className="h-5 w-5" />
-                </Button>
-              </Link>
-              <div>
-                <h1 className="text-xl font-bold text-slate-900">Compare Runs</h1>
-                <p className="text-xs text-slate-500">{comparison.baselineRun.projectName}</p>
+    <div className="bg-background min-h-[calc(100vh-4rem)]">
+      <main className="max-w-[1100px] mx-auto px-6 py-10">
+
+        {/* Header */}
+        <div className="flex items-center justify-between mb-10">
+          <div className="flex items-center gap-4">
+            <Link href="/results">
+              <button className="p-1.5 rounded-lg border border-border bg-transparent text-muted-foreground hover:bg-muted hover:text-foreground transition-colors cursor-pointer">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5}><path d="m15 18-6-6 6-6"/></svg>
+              </button>
+            </Link>
+            <div>
+              <h1 className="text-[26px] font-bold text-foreground tracking-[-0.03em]">Audit Comparison</h1>
+              <p className="text-muted-foreground text-[15px] mt-0.5">Side-by-side performance delta analysis</p>
+            </div>
+          </div>
+          <button
+            onClick={handleDownloadComparisonPDF}
+            className="inline-flex items-center gap-2 px-5 py-2.5 text-sm font-medium bg-primary text-primary-foreground rounded-[10px] hover:opacity-85 transition-all cursor-pointer border-none"
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5}><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+            Export PDF
+          </button>
+        </div>
+
+        {/* Run Cards */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
+          <div className="bg-card border border-border rounded-2xl p-5 relative overflow-hidden">
+            <div className="absolute left-0 top-0 bottom-0 w-[3px] rounded-r" style={{ background: 'var(--ring)' }} />
+            <div className="pl-3">
+              <span className="text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">Baseline</span>
+              <h3 className="text-base font-bold text-foreground mt-1">{comparison.baselineRun.auditLabel}</h3>
+              <div className="flex gap-4 mt-2 text-xs text-muted-foreground">
+                <span>{formatDate(comparison.baselineRun.generatedAt)}</span>
+                <span>{comparison.baselineRun.projectName}</span>
+                <span className="status-badge text-muted-foreground" style={{ background: 'var(--background)', padding: '1px 6px', fontSize: '10px' }}>{comparison.baselineRun.environment}</span>
               </div>
             </div>
-            <Button onClick={handleDownloadComparisonPDF} className="bg-slate-900 hover:bg-slate-800 text-white">
-              <Download className="h-4 w-4 mr-2" />
-              Export Comparison PDF
-            </Button>
+          </div>
+          <div className="bg-card rounded-2xl p-5 relative overflow-hidden" style={{ border: '1px solid color-mix(in srgb, var(--blue-text) 20%, var(--border))' }}>
+            <div className="absolute left-0 top-0 bottom-0 w-[3px] rounded-r opacity-60" style={{ background: 'var(--blue-text)' }} />
+            <div className="pl-3">
+              <span className="text-[10px] font-semibold uppercase tracking-[0.08em]" style={{ color: 'var(--blue-text)' }}>Current</span>
+              <h3 className="text-base font-bold text-foreground mt-1">{comparison.currentRun.auditLabel}</h3>
+              <div className="flex gap-4 mt-2 text-xs text-muted-foreground">
+                <span>{formatDate(comparison.currentRun.generatedAt)}</span>
+                <span>{comparison.currentRun.projectName}</span>
+                <span className="status-badge" style={{ background: 'var(--blue-bg)', color: 'var(--blue-text)', padding: '1px 6px', fontSize: '10px' }}>{comparison.currentRun.environment}</span>
+              </div>
+            </div>
           </div>
         </div>
-      </header>
 
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-
-        {/* Run info cards */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
-          <Card className="border-slate-200">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-[10px] font-bold tracking-widest text-slate-400 uppercase">Baseline</CardTitle>
-            </CardHeader>
-            <CardContent className="pt-0">
-              <p className="font-bold text-slate-900">{comparison.baselineRun.auditLabel}</p>
-              <p className="text-sm text-slate-500">{comparison.baselineRun.projectName}</p>
-              <div className="flex items-center gap-1.5 mt-2 text-xs text-slate-400">
-                <Calendar className="h-3.5 w-3.5" />
-                {formatDate(comparison.baselineRun.generatedAt)}
-              </div>
-            </CardContent>
-          </Card>
-          <Card className="border-blue-200 bg-blue-50/30">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-[10px] font-bold tracking-widest text-blue-500 uppercase">Current</CardTitle>
-            </CardHeader>
-            <CardContent className="pt-0">
-              <p className="font-bold text-slate-900">{comparison.currentRun.auditLabel}</p>
-              <p className="text-sm text-slate-500">{comparison.currentRun.projectName}</p>
-              <div className="flex items-center gap-1.5 mt-2 text-xs text-slate-400">
-                <Calendar className="h-3.5 w-3.5" />
-                {formatDate(comparison.currentRun.generatedAt)}
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-
-        {/* Summary cards */}
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-8">
-          {/* Health delta */}
-          <Card className={cn(
-            "md:col-span-1 border-2",
-            healthDelta > 0 ? "border-green-200 bg-green-50" :
-            healthDelta < 0 ? "border-red-200 bg-red-50" : "border-slate-200"
-          )}>
-            <CardContent className="pt-4 pb-4">
-              <p className="text-[10px] font-bold tracking-widest uppercase text-slate-500 mb-1">Health</p>
-              <p className={cn(
-                "text-3xl font-black",
-                healthDelta > 0 ? "text-green-600" : healthDelta < 0 ? "text-red-600" : "text-slate-600"
-              )}>
+        {/* Delta Summary — Double Bezel */}
+        <div className="grid grid-cols-5 gap-3 mb-10">
+          <div className="double-bezel">
+            <div className="double-bezel-inner text-center !py-3 !px-4">
+              <div className="font-mono text-[22px] font-bold" style={{ color: healthDelta > 0 ? 'var(--green-text)' : healthDelta < 0 ? 'var(--red-text)' : 'var(--foreground)' }}>
                 {healthDelta > 0 ? '+' : ''}{healthDelta}%
-              </p>
-              <p className="text-[10px] text-slate-400 mt-1">{baselineHealth}% → {currentHealth}%</p>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardContent className="pt-4 pb-4">
-              <p className="text-[10px] font-bold tracking-widest uppercase text-slate-500 mb-1">Compared</p>
-              <div className="flex items-center gap-2">
-                <Target className="h-5 w-5 text-slate-400" />
-                <p className="text-3xl font-black text-slate-900">{summary.totalCompared}</p>
               </div>
-            </CardContent>
-          </Card>
-
-          <Card className="border-green-200">
-            <CardContent className="pt-4 pb-4">
-              <p className="text-[10px] font-bold tracking-widest uppercase text-green-600 mb-1">Improved</p>
-              <div className="flex items-center gap-2">
-                <TrendingUp className="h-5 w-5 text-green-500" />
-                <p className="text-3xl font-black text-green-600">{summary.improved}</p>
+              <div className="text-[10px] uppercase tracking-[0.08em] mt-1" style={{ color: 'var(--ring)' }}>Health Delta</div>
+            </div>
+          </div>
+          <div className="double-bezel">
+            <div className="double-bezel-inner text-center !py-3 !px-4">
+              <div className="font-mono text-[22px] font-bold text-foreground">{summary.totalCompared}</div>
+              <div className="text-[10px] uppercase tracking-[0.08em] mt-1" style={{ color: 'var(--ring)' }}>Compared</div>
+            </div>
+          </div>
+          <div className="double-bezel">
+            <div className="double-bezel-inner text-center !py-3 !px-4">
+              <div className="flex items-center justify-center gap-1">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--green-text)" strokeWidth={2}><polyline points="18 15 12 9 6 15"/></svg>
+                <span className="font-mono text-[22px] font-bold" style={{ color: 'var(--green-text)' }}>{summary.improved}</span>
               </div>
-            </CardContent>
-          </Card>
-
-          <Card className="border-red-200">
-            <CardContent className="pt-4 pb-4">
-              <p className="text-[10px] font-bold tracking-widest uppercase text-red-600 mb-1">Regressed</p>
-              <div className="flex items-center gap-2">
-                <TrendingDown className="h-5 w-5 text-red-500" />
-                <p className="text-3xl font-black text-red-600">{summary.regressed}</p>
+              <div className="text-[10px] uppercase tracking-[0.08em] mt-1" style={{ color: 'var(--ring)' }}>Improved</div>
+            </div>
+          </div>
+          <div className="double-bezel">
+            <div className="double-bezel-inner text-center !py-3 !px-4">
+              <div className="flex items-center justify-center gap-1">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--red-text)" strokeWidth={2}><polyline points="6 9 12 15 18 9"/></svg>
+                <span className="font-mono text-[22px] font-bold" style={{ color: 'var(--red-text)' }}>{summary.regressed}</span>
               </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardContent className="pt-4 pb-4">
-              <p className="text-[10px] font-bold tracking-widest uppercase text-slate-500 mb-1">Unchanged</p>
-              <div className="flex items-center gap-2">
-                <Minus className="h-5 w-5 text-slate-400" />
-                <p className="text-3xl font-black text-slate-600">{summary.unchanged}</p>
+              <div className="text-[10px] uppercase tracking-[0.08em] mt-1" style={{ color: 'var(--ring)' }}>Regressed</div>
+            </div>
+          </div>
+          <div className="double-bezel">
+            <div className="double-bezel-inner text-center !py-3 !px-4">
+              <div className="flex items-center justify-center gap-1">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--muted-foreground)" strokeWidth={2}><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                <span className="font-mono text-[22px] font-bold text-muted-foreground">{summary.unchanged}</span>
               </div>
-            </CardContent>
-          </Card>
+              <div className="text-[10px] uppercase tracking-[0.08em] mt-1" style={{ color: 'var(--ring)' }}>Unchanged</div>
+            </div>
+          </div>
         </div>
 
         {/* Category score summary */}
         {summary.categoryScoresCompared > 0 && (
-          <Card className="mb-8 border-indigo-200 bg-indigo-50/40">
-            <CardContent className="pt-5 pb-5">
-              <div className="flex items-center gap-2 mb-4">
-                <BarChart3 className="h-4 w-4 text-indigo-600" />
-                <h3 className="text-sm font-bold text-indigo-900 tracking-wide">Lighthouse Category Score Changes</h3>
-                <span className="text-xs text-indigo-500 ml-auto">{summary.categoryScoresCompared} scores compared</span>
-              </div>
-              <div className="grid grid-cols-3 gap-3">
-                {[
-                  { label: 'Improved', value: summary.categoryScoresImproved, color: 'text-green-600 bg-green-50 border-green-200' },
-                  { label: 'Regressed', value: summary.categoryScoresRegressed, color: 'text-red-600 bg-red-50 border-red-200' },
-                  { label: 'Unchanged', value: summary.categoryScoresUnchanged, color: 'text-slate-600 bg-white border-slate-200' },
-                ].map(item => (
-                  <div key={item.label} className={cn("flex items-center justify-between p-3 rounded-lg border", item.color)}>
-                    <span className="text-sm font-medium">{item.label}</span>
-                    <span className="text-xl font-bold">{item.value}</span>
-                  </div>
-                ))}
-              </div>
-            </CardContent>
-          </Card>
+          <div className="mb-8 bg-card border border-border rounded-2xl p-5">
+            <div className="flex items-center gap-2 mb-4">
+              <BarChart3 className="h-4 w-4" style={{ color: 'var(--blue-text)' }} />
+              <h3 className="text-sm font-bold text-foreground tracking-wide">Lighthouse Category Score Changes</h3>
+              <span className="text-xs text-muted-foreground ml-auto">{summary.categoryScoresCompared} scores compared</span>
+            </div>
+            <div className="grid grid-cols-3 gap-3">
+              {[
+                { label: 'Improved', value: summary.categoryScoresImproved, bgVar: 'var(--green-bg)', textVar: 'var(--green-text)' },
+                { label: 'Regressed', value: summary.categoryScoresRegressed, bgVar: 'var(--red-bg)', textVar: 'var(--red-text)' },
+                { label: 'Unchanged', value: summary.categoryScoresUnchanged, bgVar: 'var(--background)', textVar: 'var(--muted-foreground)' },
+              ].map(item => (
+                <div key={item.label} className="flex items-center justify-between p-3 rounded-lg" style={{ background: item.bgVar, color: item.textVar }}>
+                  <span className="text-sm font-medium">{item.label}</span>
+                  <span className="text-xl font-bold">{item.value}</span>
+                </div>
+              ))}
+            </div>
+          </div>
         )}
 
         {/* Page mismatch alerts */}
         {(comparison.missingPages.length > 0 || comparison.newPages.length > 0) && (
-          <Card className="mb-6 border-amber-200 bg-amber-50">
-            <CardContent className="pt-5 pb-5">
-              <div className="flex items-start gap-3">
-                <AlertCircle className="h-5 w-5 text-amber-600 mt-0.5 shrink-0" />
-                <div className="text-sm">
-                  {comparison.missingPages.length > 0 && (
-                    <p className="text-amber-800 font-medium mb-1">
-                      Pages in baseline not in current: <span className="font-normal">{comparison.missingPages.join(', ')}</span>
-                    </p>
-                  )}
-                  {comparison.newPages.length > 0 && (
-                    <p className="text-amber-800 font-medium">
-                      New pages in current audit: <span className="font-normal">{comparison.newPages.join(', ')}</span>
-                    </p>
-                  )}
-                </div>
-              </div>
-            </CardContent>
-          </Card>
+          <div className="mb-6 p-4 rounded-xl border flex items-start gap-3" style={{ background: 'var(--amber-bg)', borderColor: 'color-mix(in srgb, var(--amber-text) 15%, transparent)' }}>
+            <AlertCircle className="h-5 w-5 mt-0.5 shrink-0" style={{ color: 'var(--amber-text)' }} />
+            <div className="text-sm" style={{ color: 'var(--amber-text)' }}>
+              {comparison.missingPages.length > 0 && (
+                <p className="font-medium mb-1">
+                  Pages in baseline not in current: <span className="font-normal">{comparison.missingPages.join(', ')}</span>
+                </p>
+              )}
+              {comparison.newPages.length > 0 && (
+                <p className="font-medium">
+                  New pages in current audit: <span className="font-normal">{comparison.newPages.join(', ')}</span>
+                </p>
+              )}
+            </div>
+          </div>
         )}
 
-        {/* Detailed comparison tabs */}
-        <Tabs defaultValue="metrics">
-          <TabsList className="mb-6 bg-slate-100 p-1 rounded-lg h-auto">
-            <TabsTrigger value="metrics" className="rounded-md text-sm font-semibold px-4 py-2">
-              <Activity className="h-4 w-4 mr-2" />
-              Metrics ({comparison.deltas.length})
-            </TabsTrigger>
-            <TabsTrigger value="categories" className="rounded-md text-sm font-semibold px-4 py-2">
-              <BarChart3 className="h-4 w-4 mr-2" />
-              Category Scores ({comparison.categoryScoreDeltas.length})
-            </TabsTrigger>
-          </TabsList>
-
-          <TabsContent value="metrics">
-            <Tabs defaultValue="regressions">
-              <TabsList className="mb-4">
-                <TabsTrigger value="regressions" className="text-red-600 data-[state=active]:bg-red-50">
-                  Regressions ({regressions.length})
+        {/* Detailed Comparison */}
+        <div className="bg-card border border-border rounded-2xl overflow-hidden">
+          <Tabs defaultValue="metrics" className="w-full">
+            {/* Row 1: Primary tabs (left) + Page dropdown + Device toggle (right) */}
+            <div className="flex items-center justify-between px-6 pt-5 pb-0 gap-3">
+              <TabsList className="bg-secondary p-1 rounded-lg h-auto w-fit shrink-0">
+                <TabsTrigger value="metrics" className="rounded-md text-xs font-bold uppercase tracking-wider px-4 py-2 data-[state=active]:bg-card data-[state=active]:shadow-sm">
+                  <Activity className="h-3.5 w-3.5 mr-2" />
+                  Metrics ({filteredComparison.deltas.length})
                 </TabsTrigger>
-                <TabsTrigger value="improvements" className="text-green-600 data-[state=active]:bg-green-50">
-                  Improvements ({improvements.length})
+                <TabsTrigger value="categories" className="rounded-md text-xs font-bold uppercase tracking-wider px-4 py-2 data-[state=active]:bg-card data-[state=active]:shadow-sm">
+                  <BarChart3 className="h-3.5 w-3.5 mr-2" />
+                  Category Scores ({filteredComparison.categoryScoreDeltas.length})
                 </TabsTrigger>
-                <TabsTrigger value="all">All ({comparison.deltas.length})</TabsTrigger>
               </TabsList>
-              <TabsContent value="regressions">
-                <ComparisonTable deltas={regressions} />
-              </TabsContent>
-              <TabsContent value="improvements">
-                <ComparisonTable deltas={improvements} />
-              </TabsContent>
-              <TabsContent value="all">
-                <ComparisonTable deltas={comparison.deltas} />
-              </TabsContent>
-            </Tabs>
-          </TabsContent>
 
-          <TabsContent value="categories">
-            <Tabs defaultValue="regressions">
-              <TabsList className="mb-4">
-                <TabsTrigger value="regressions" className="text-red-600 data-[state=active]:bg-red-50">
-                  Regressions ({categoryRegressions.length})
-                </TabsTrigger>
-                <TabsTrigger value="improvements" className="text-green-600 data-[state=active]:bg-green-50">
-                  Improvements ({categoryImprovements.length})
-                </TabsTrigger>
-                <TabsTrigger value="all">All ({comparison.categoryScoreDeltas.length})</TabsTrigger>
-              </TabsList>
-              <TabsContent value="regressions">
-                <CategoryComparisonTable deltas={categoryRegressions} />
-              </TabsContent>
-              <TabsContent value="improvements">
-                <CategoryComparisonTable deltas={categoryImprovements} />
-              </TabsContent>
-              <TabsContent value="all">
-                <CategoryComparisonTable deltas={comparison.categoryScoreDeltas} />
-              </TabsContent>
-            </Tabs>
-          </TabsContent>
-        </Tabs>
+              <div className="flex items-center gap-3">
+                {/* Page filter dropdown */}
+                {pageLabels.length >= 1 && (
+                  <div className="relative">
+                    <FileText className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
+                    <select
+                      value={selectedPage}
+                      onChange={(e) => setSelectedPage(e.target.value)}
+                      className="appearance-none bg-secondary border border-border rounded-lg pl-8 pr-8 py-1.5 text-[11px] font-bold uppercase tracking-widest text-foreground cursor-pointer hover:bg-secondary/80 transition-colors focus:outline-none focus:ring-1 focus:ring-primary"
+                    >
+                      {pageLabels.length > 1 && (
+                        <option value="all">All Pages ({pageLabels.length})</option>
+                      )}
+                      {pageLabels.map(label => (
+                        <option key={label} value={label}>{label}</option>
+                      ))}
+                    </select>
+                    <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
+                  </div>
+                )}
+
+                {/* Device toggle */}
+                <div className="flex items-center gap-2 bg-secondary p-1 rounded-lg border border-border">
+                  <button
+                    onClick={() => setSelectedDevice('mobile')}
+                    className={cn(
+                      "flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[11px] font-bold uppercase tracking-widest transition-all",
+                      selectedDevice === 'mobile'
+                        ? "bg-card shadow-sm text-foreground"
+                        : "text-muted-foreground hover:text-foreground"
+                    )}
+                  >
+                    <Smartphone className="h-3.5 w-3.5" />
+                    Mobile
+                  </button>
+                  <button
+                    onClick={() => setSelectedDevice('desktop')}
+                    className={cn(
+                      "flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[11px] font-bold uppercase tracking-widest transition-all",
+                      selectedDevice === 'desktop'
+                        ? "bg-card shadow-sm text-foreground"
+                        : "text-muted-foreground hover:text-foreground"
+                    )}
+                  >
+                    <Monitor className="h-3.5 w-3.5" />
+                    Desktop
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <TabsContent value="metrics" className="mt-0">
+              <Tabs defaultValue="all">
+                {/* Row 2: Info text (left) + Filter pills (right) */}
+                <div className="flex items-center justify-between px-6 py-3">
+                  <span className="text-[11px] text-muted-foreground font-medium">
+                    Showing {selectedDevice} results · {summary.totalCompared} metrics compared
+                  </span>
+                  <TabsList className="bg-transparent p-0 h-auto gap-1">
+                    <TabsTrigger
+                      value="all"
+                      className="rounded-full px-3 py-1 text-[11px] font-bold tracking-wide border border-transparent data-[state=active]:border-border data-[state=active]:bg-secondary data-[state=active]:text-foreground text-muted-foreground"
+                    >
+                      All ({filteredComparison.deltas.length})
+                    </TabsTrigger>
+                    <TabsTrigger
+                      value="regressions"
+                      className="rounded-full px-3 py-1 text-[11px] font-bold tracking-wide border border-transparent data-[state=active]:border-red-500/20 data-[state=active]:bg-red-500/10 data-[state=active]:text-red-500 text-muted-foreground"
+                    >
+                      Regressions ({regressions.length})
+                    </TabsTrigger>
+                    <TabsTrigger
+                      value="improvements"
+                      className="rounded-full px-3 py-1 text-[11px] font-bold tracking-wide border border-transparent data-[state=active]:border-green-500/20 data-[state=active]:bg-green-500/10 data-[state=active]:text-green-500 text-muted-foreground"
+                    >
+                      Improvements ({improvements.length})
+                    </TabsTrigger>
+                  </TabsList>
+                </div>
+                <TabsContent value="all" className="mt-0">
+                  <ComparisonTable deltas={filteredComparison.deltas} />
+                </TabsContent>
+                <TabsContent value="regressions" className="mt-0">
+                  <ComparisonTable deltas={regressions} />
+                </TabsContent>
+                <TabsContent value="improvements" className="mt-0">
+                  <ComparisonTable deltas={improvements} />
+                </TabsContent>
+              </Tabs>
+            </TabsContent>
+
+            <TabsContent value="categories" className="mt-0">
+              <Tabs defaultValue="all">
+                {/* Row 2: Info text (left) + Filter pills (right) */}
+                <div className="flex items-center justify-between px-6 py-3">
+                  <span className="text-[11px] text-muted-foreground font-medium">
+                    Showing {selectedDevice} results · {filteredComparison.categoryScoreDeltas.length} scores compared
+                  </span>
+                  <TabsList className="bg-transparent p-0 h-auto gap-1">
+                    <TabsTrigger
+                      value="all"
+                      className="rounded-full px-3 py-1 text-[11px] font-bold tracking-wide border border-transparent data-[state=active]:border-border data-[state=active]:bg-secondary data-[state=active]:text-foreground text-muted-foreground"
+                    >
+                      All ({filteredComparison.categoryScoreDeltas.length})
+                    </TabsTrigger>
+                    <TabsTrigger
+                      value="regressions"
+                      className="rounded-full px-3 py-1 text-[11px] font-bold tracking-wide border border-transparent data-[state=active]:border-red-500/20 data-[state=active]:bg-red-500/10 data-[state=active]:text-red-500 text-muted-foreground"
+                    >
+                      Regressions ({categoryRegressions.length})
+                    </TabsTrigger>
+                    <TabsTrigger
+                      value="improvements"
+                      className="rounded-full px-3 py-1 text-[11px] font-bold tracking-wide border border-transparent data-[state=active]:border-green-500/20 data-[state=active]:bg-green-500/10 data-[state=active]:text-green-500 text-muted-foreground"
+                    >
+                      Improvements ({categoryImprovements.length})
+                    </TabsTrigger>
+                  </TabsList>
+                </div>
+                <TabsContent value="all" className="mt-0">
+                  <CategoryComparisonTable deltas={filteredComparison.categoryScoreDeltas} />
+                </TabsContent>
+                <TabsContent value="regressions" className="mt-0">
+                  <CategoryComparisonTable deltas={categoryRegressions} />
+                </TabsContent>
+                <TabsContent value="improvements" className="mt-0">
+                  <CategoryComparisonTable deltas={categoryImprovements} />
+                </TabsContent>
+              </Tabs>
+            </TabsContent>
+          </Tabs>
+        </div>
       </main>
     </div>
   );
@@ -539,82 +669,85 @@ export default function ComparePage() {
 function ComparisonTable({ deltas }: { deltas: ComparisonDelta[] }) {
   if (deltas.length === 0) {
     return (
-      <Card className="border-slate-200">
-        <CardContent className="py-16 text-center">
-          <CheckCircle2 className="h-10 w-10 text-green-400 mx-auto mb-3" />
-          <p className="text-slate-500 font-medium">No changes in this category</p>
-        </CardContent>
-      </Card>
+      <div className="py-16 text-center">
+        <CheckCircle2 className="h-10 w-10 text-green-500/50 mx-auto mb-3" />
+        <p className="text-muted-foreground font-medium text-sm">No changes in this category</p>
+      </div>
     );
   }
 
   return (
-    <Card className="rounded-xl shadow-sm border-slate-200 overflow-hidden">
-      <CardContent className="p-0">
-        <ScrollArea className="h-[480px]">
-          <Table>
-            <TableHeader>
-              <TableRow className="bg-slate-50 hover:bg-slate-50">
-                <TableHead className="font-bold text-slate-500 text-[10px] uppercase tracking-widest pl-6">Page</TableHead>
-                <TableHead className="font-bold text-slate-500 text-[10px] uppercase tracking-widest">Metric</TableHead>
-                <TableHead className="font-bold text-slate-500 text-[10px] uppercase tracking-widest">Device</TableHead>
-                <TableHead className="font-bold text-slate-500 text-[10px] uppercase tracking-widest text-right">Baseline</TableHead>
-                <TableHead className="font-bold text-slate-500 text-[10px] uppercase tracking-widest text-right">Current</TableHead>
-                <TableHead className="font-bold text-slate-500 text-[10px] uppercase tracking-widest text-right">Delta</TableHead>
-                <TableHead className="font-bold text-slate-500 text-[10px] uppercase tracking-widest pr-6">Trend</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {deltas.map((delta, index) => (
-                <TableRow key={index} className="border-b border-slate-100 last:border-0 hover:bg-blue-50/20">
-                  <TableCell className="font-semibold text-slate-900 pl-6">{delta.pageKey}</TableCell>
-                  <TableCell className="font-mono text-xs font-bold text-slate-700">{delta.metricName}</TableCell>
-                  <TableCell className="capitalize text-slate-500 text-sm">{delta.device}</TableCell>
-                  <TableCell className="text-right font-mono text-sm text-slate-500">{formatMetricValue(delta.baselineValue, delta.metricName)}</TableCell>
-                  <TableCell className="text-right font-mono text-sm font-bold text-slate-900">{formatMetricValue(delta.currentValue, delta.metricName)}</TableCell>
-                  <TableCell className={cn(
-                    "text-right font-mono text-sm font-bold",
-                    delta.deltaDirection === 'improved' ? 'text-green-600' :
-                    delta.deltaDirection === 'regressed' ? 'text-red-600' : 'text-slate-400'
-                  )}>
-                    {delta.deltaDirection === 'improved' ? '−' : delta.deltaDirection === 'regressed' ? '+' : '±'}
-                    {formatMetricValue(delta.deltaValue, delta.metricName)}
-                  </TableCell>
-                  <TableCell className="pr-6">
-                    <Badge
-                      variant="secondary"
-                      className={cn(
-                        "text-[9px] uppercase tracking-wider font-black rounded px-2 py-0.5",
-                        delta.deltaDirection === 'improved' ? 'bg-green-50 text-green-700 border-green-100' :
-                        delta.deltaDirection === 'regressed' ? 'bg-red-50 text-red-700 border-red-100' :
-                        'bg-slate-100 text-slate-500'
-                      )}
-                    >
-                      {delta.deltaDirection === 'improved' && <TrendingUp className="h-2.5 w-2.5 mr-1 inline" />}
-                      {delta.deltaDirection === 'regressed' && <TrendingDown className="h-2.5 w-2.5 mr-1 inline" />}
-                      {delta.deltaDirection === 'unchanged' && <Minus className="h-2.5 w-2.5 mr-1 inline" />}
-                      {delta.deltaDirection}
-                    </Badge>
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </ScrollArea>
-      </CardContent>
-    </Card>
+    <div className="overflow-hidden">
+      <Table>
+        <TableHeader>
+          <TableRow className="bg-secondary/50 hover:bg-secondary/50 border-t border-border">
+            <TableHead className="font-bold text-muted-foreground text-[10px] uppercase tracking-widest pl-6">Page</TableHead>
+            <TableHead className="font-bold text-muted-foreground text-[10px] uppercase tracking-widest">Metric</TableHead>
+            <TableHead className="font-bold text-muted-foreground text-[10px] uppercase tracking-widest text-center">Baseline</TableHead>
+            <TableHead className="font-bold text-muted-foreground text-[10px] uppercase tracking-widest text-center w-8"></TableHead>
+            <TableHead className="font-bold text-muted-foreground text-[10px] uppercase tracking-widest text-center">Current</TableHead>
+            <TableHead className="font-bold text-muted-foreground text-[10px] uppercase tracking-widest text-right">Delta</TableHead>
+            <TableHead className="font-bold text-muted-foreground text-[10px] uppercase tracking-widest text-right pr-6">Trend</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {deltas.map((delta, index) => (
+            <TableRow key={index} className={cn(
+              "border-b border-border last:border-0 hover:bg-secondary/40 transition-colors",
+              index % 2 === 0 ? "" : "bg-secondary/20"
+            )}>
+              <TableCell className="font-semibold text-foreground pl-6 text-sm">{delta.pageKey}</TableCell>
+              <TableCell>
+                <span className="font-mono text-xs font-bold px-2 py-1 rounded bg-secondary border border-border text-foreground">
+                  {delta.metricName}
+                </span>
+              </TableCell>
+              <TableCell className="text-center font-mono text-sm text-muted-foreground tabular-nums">
+                {formatMetricValue(delta.baselineValue, delta.metricName)}
+              </TableCell>
+              <TableCell className="text-center text-muted-foreground/40">→</TableCell>
+              <TableCell className="text-center font-mono text-sm font-bold text-foreground tabular-nums">
+                {formatMetricValue(delta.currentValue, delta.metricName)}
+              </TableCell>
+              <TableCell className={cn(
+                "text-right font-mono text-sm font-bold tabular-nums",
+                delta.deltaDirection === 'improved' ? 'text-green-500' :
+                delta.deltaDirection === 'regressed' ? 'text-red-500' : 'text-muted-foreground'
+              )}>
+                {delta.deltaDirection === 'improved' ? '−' : delta.deltaDirection === 'regressed' ? '+' : '±'}
+                {formatMetricValue(delta.deltaValue, delta.metricName)}
+              </TableCell>
+              <TableCell className="text-right pr-6">
+                <Badge
+                  variant="secondary"
+                  className={cn(
+                    "text-[9px] uppercase tracking-wider font-black rounded-full px-2.5 py-0.5",
+                    delta.deltaDirection === 'improved' ? 'bg-green-500/10 text-green-500 border-green-500/20' :
+                    delta.deltaDirection === 'regressed' ? 'bg-red-500/10 text-red-500 border-red-500/20' :
+                    'bg-muted text-muted-foreground'
+                  )}
+                >
+                  {delta.deltaDirection === 'improved' && <TrendingUp className="h-2.5 w-2.5 mr-1 inline" />}
+                  {delta.deltaDirection === 'regressed' && <TrendingDown className="h-2.5 w-2.5 mr-1 inline" />}
+                  {delta.deltaDirection === 'unchanged' && <Minus className="h-2.5 w-2.5 mr-1 inline" />}
+                  {delta.deltaDirection}
+                </Badge>
+              </TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+    </div>
   );
 }
 
 function CategoryComparisonTable({ deltas }: { deltas: CategoryScoreDelta[] }) {
   if (deltas.length === 0) {
     return (
-      <Card className="border-slate-200">
-        <CardContent className="py-16 text-center">
-          <CheckCircle2 className="h-10 w-10 text-green-400 mx-auto mb-3" />
-          <p className="text-slate-500 font-medium">No category score changes</p>
-        </CardContent>
-      </Card>
+      <div className="py-16 text-center">
+        <CheckCircle2 className="h-10 w-10 text-green-500/50 mx-auto mb-3" />
+        <p className="text-muted-foreground font-medium text-sm">No category score changes</p>
+      </div>
     );
   }
 
@@ -629,63 +762,62 @@ function CategoryComparisonTable({ deltas }: { deltas: CategoryScoreDelta[] }) {
   };
 
   return (
-    <Card className="rounded-xl shadow-sm border-slate-200 overflow-hidden">
-      <CardContent className="p-0">
-        <ScrollArea className="h-[480px]">
-          <Table>
-            <TableHeader>
-              <TableRow className="bg-slate-50 hover:bg-slate-50">
-                <TableHead className="font-bold text-slate-500 text-[10px] uppercase tracking-widest pl-6">Page</TableHead>
-                <TableHead className="font-bold text-slate-500 text-[10px] uppercase tracking-widest">Category</TableHead>
-                <TableHead className="font-bold text-slate-500 text-[10px] uppercase tracking-widest">Device</TableHead>
-                <TableHead className="font-bold text-slate-500 text-[10px] uppercase tracking-widest text-right">Baseline</TableHead>
-                <TableHead className="font-bold text-slate-500 text-[10px] uppercase tracking-widest text-right">Current</TableHead>
-                <TableHead className="font-bold text-slate-500 text-[10px] uppercase tracking-widest text-right">Delta</TableHead>
-                <TableHead className="font-bold text-slate-500 text-[10px] uppercase tracking-widest pr-6">Trend</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {deltas.map((delta, index) => (
-                <TableRow key={index} className="border-b border-slate-100 last:border-0 hover:bg-blue-50/20">
-                  <TableCell className="font-semibold text-slate-900 pl-6">{delta.pageKey}</TableCell>
-                  <TableCell>
-                    <div className="flex items-center gap-1.5">
-                      {getCategoryIcon(delta.category)}
-                      <span className="capitalize text-sm text-slate-700">{delta.category.replace(/-/g, ' ')}</span>
-                    </div>
-                  </TableCell>
-                  <TableCell className="capitalize text-slate-500 text-sm">{delta.device}</TableCell>
-                  <TableCell className="text-right font-mono text-sm text-slate-500">{delta.baselineScore}</TableCell>
-                  <TableCell className="text-right font-mono text-sm font-bold text-slate-900">{delta.currentScore}</TableCell>
-                  <TableCell className={cn(
-                    "text-right font-mono text-sm font-bold",
-                    delta.deltaDirection === 'improved' ? 'text-green-600' :
-                    delta.deltaDirection === 'regressed' ? 'text-red-600' : 'text-slate-400'
-                  )}>
-                    {delta.delta > 0 ? '+' : ''}{delta.delta}
-                  </TableCell>
-                  <TableCell className="pr-6">
-                    <Badge
-                      variant="secondary"
-                      className={cn(
-                        "text-[9px] uppercase tracking-wider font-black rounded px-2 py-0.5",
-                        delta.deltaDirection === 'improved' ? 'bg-green-50 text-green-700 border-green-100' :
-                        delta.deltaDirection === 'regressed' ? 'bg-red-50 text-red-700 border-red-100' :
-                        'bg-slate-100 text-slate-500'
-                      )}
-                    >
-                      {delta.deltaDirection === 'improved' && <TrendingUp className="h-2.5 w-2.5 mr-1 inline" />}
-                      {delta.deltaDirection === 'regressed' && <TrendingDown className="h-2.5 w-2.5 mr-1 inline" />}
-                      {delta.deltaDirection === 'unchanged' && <Minus className="h-2.5 w-2.5 mr-1 inline" />}
-                      {delta.deltaDirection}
-                    </Badge>
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </ScrollArea>
-      </CardContent>
-    </Card>
+    <div className="overflow-hidden">
+      <Table>
+        <TableHeader>
+          <TableRow className="bg-secondary/50 hover:bg-secondary/50 border-t border-border">
+            <TableHead className="font-bold text-muted-foreground text-[10px] uppercase tracking-widest pl-6">Page</TableHead>
+            <TableHead className="font-bold text-muted-foreground text-[10px] uppercase tracking-widest">Category</TableHead>
+            <TableHead className="font-bold text-muted-foreground text-[10px] uppercase tracking-widest text-center">Baseline</TableHead>
+            <TableHead className="font-bold text-muted-foreground text-[10px] uppercase tracking-widest text-center w-8"></TableHead>
+            <TableHead className="font-bold text-muted-foreground text-[10px] uppercase tracking-widest text-center">Current</TableHead>
+            <TableHead className="font-bold text-muted-foreground text-[10px] uppercase tracking-widest text-right">Delta</TableHead>
+            <TableHead className="font-bold text-muted-foreground text-[10px] uppercase tracking-widest text-right pr-6">Trend</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {deltas.map((delta, index) => (
+            <TableRow key={index} className={cn(
+              "border-b border-border last:border-0 hover:bg-secondary/40 transition-colors",
+              index % 2 === 0 ? "" : "bg-secondary/20"
+            )}>
+              <TableCell className="font-semibold text-foreground pl-6 text-sm">{delta.pageKey}</TableCell>
+              <TableCell>
+                <div className="flex items-center gap-2">
+                  {getCategoryIcon(delta.category)}
+                  <span className="capitalize text-sm text-foreground font-medium">{delta.category.replace(/-/g, ' ')}</span>
+                </div>
+              </TableCell>
+              <TableCell className="text-center font-mono text-sm text-muted-foreground tabular-nums">{delta.baselineScore}</TableCell>
+              <TableCell className="text-center text-muted-foreground/40">→</TableCell>
+              <TableCell className="text-center font-mono text-sm font-bold text-foreground tabular-nums">{delta.currentScore}</TableCell>
+              <TableCell className={cn(
+                "text-right font-mono text-sm font-bold tabular-nums",
+                delta.deltaDirection === 'improved' ? 'text-green-500' :
+                delta.deltaDirection === 'regressed' ? 'text-red-500' : 'text-muted-foreground'
+              )}>
+                {delta.deltaDirection === 'improved' ? '+' : delta.deltaDirection === 'regressed' ? '' : '±'}{delta.delta}
+              </TableCell>
+              <TableCell className="text-right pr-6">
+                <Badge
+                  variant="secondary"
+                  className={cn(
+                    "text-[9px] uppercase tracking-wider font-black rounded-full px-2.5 py-0.5",
+                    delta.deltaDirection === 'improved' ? 'bg-green-500/10 text-green-500 border-green-500/20' :
+                    delta.deltaDirection === 'regressed' ? 'bg-red-500/10 text-red-500 border-red-500/20' :
+                    'bg-muted text-muted-foreground'
+                  )}
+                >
+                  {delta.deltaDirection === 'improved' && <TrendingUp className="h-2.5 w-2.5 mr-1 inline" />}
+                  {delta.deltaDirection === 'regressed' && <TrendingDown className="h-2.5 w-2.5 mr-1 inline" />}
+                  {delta.deltaDirection === 'unchanged' && <Minus className="h-2.5 w-2.5 mr-1 inline" />}
+                  {delta.deltaDirection}
+                </Badge>
+              </TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+    </div>
   );
 }

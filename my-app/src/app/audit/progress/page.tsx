@@ -2,28 +2,14 @@
 
 import { useEffect, useState, useRef } from 'react';
 import { useRouter } from 'next/navigation';
-import { Card, CardContent } from '@/components/ui/card';
-import { Progress } from '@/components/ui/progress';
 import { Button } from '@/components/ui/button';
-import { runAudit, retryFailedItems, FullAuditResult, PageDeviceStatus, MAX_RETRY_ATTEMPTS } from '@/services/audit';
+import { runAudit, retryFailedItems, FullAuditResult, PageDeviceStatus, MAX_RETRY_ATTEMPTS, getPageConcurrency } from '@/services/audit';
 import { saveAuditStateAsync } from '@/services/storage';
-import { AuditFormData, AuditState, MetricResult, CategoryScore, DiagnosticItem, CWVAssessment, Device } from '@/types';
+import { AuditFormData, AuditState, MetricResult, CategoryScore, DiagnosticItem, CWVAssessment } from '@/types';
 import {
   Loader2,
-  CheckCircle2,
-  XCircle,
-  Smartphone,
-  Monitor,
-  ArrowRight,
   RotateCcw,
-  RefreshCcw,
-  AlertTriangle,
-  Clock,
-  Activity,
-  BarChart3,
-  FileSearch,
-  Timer,
-  WifiOff
+  ArrowRight,
 } from 'lucide-react';
 import Link from 'next/link';
 
@@ -42,13 +28,38 @@ interface PageProgress {
   cwvAssessment?: CWVAssessment;
 }
 
-function StatusIcon({ status }: { status: PageDeviceStatus }) {
-  if (status === 'running') return <span className="w-2 h-2 rounded-full bg-blue-500 animate-pulse inline-block" />;
-  if (status === 'completed') return <span className="w-2 h-2 rounded-full bg-green-500 inline-block" />;
-  if (status === 'failed') return <span className="w-2 h-2 rounded-full bg-red-500 inline-block" />;
-  if (status === 'timeout') return <span className="w-2 h-2 rounded-full bg-orange-500 inline-block" />;
-  if (status === 'retrying') return <span className="w-2 h-2 rounded-full bg-purple-500 animate-pulse inline-block" />;
-  return <span className="w-2 h-2 rounded-full bg-slate-300 inline-block" />; // pending
+function StatusCell({ status }: { status: PageDeviceStatus }) {
+  if (status === 'running') return (
+    <span className="inline-flex items-center gap-1.5 text-xs font-medium" style={{ color: 'var(--blue-text)' }}>
+      <svg className="animate-spin" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>
+      Running
+    </span>
+  );
+  if (status === 'completed') return (
+    <span className="inline-flex items-center gap-1.5 text-xs font-medium" style={{ color: 'var(--green-text)' }}>
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+      Done
+    </span>
+  );
+  if (status === 'failed' || status === 'timeout') return (
+    <span className="inline-flex items-center gap-1.5 text-xs font-medium" style={{ color: 'var(--red-text)' }}>
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
+      {status === 'timeout' ? 'Timeout' : 'Failed'}
+    </span>
+  );
+  if (status === 'retrying') return (
+    <span className="inline-flex items-center gap-1.5 text-xs font-medium" style={{ color: 'var(--purple-text)' }}>
+      <svg className="animate-spin" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>
+      Retrying
+    </span>
+  );
+  // pending/queued
+  return (
+    <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
+      <span className="w-2 h-2 rounded-full bg-border" />
+      Queued
+    </span>
+  );
 }
 
 function RowStatusBadge({ mobile, desktop, mobileErrorCode, desktopErrorCode }: {
@@ -64,56 +75,17 @@ function RowStatusBadge({ mobile, desktop, mobileErrorCode, desktopErrorCode }: 
   const running = mobile === 'running' || desktop === 'running' || (mobile === 'completed' && desktop === 'pending');
   const queued = mobile === 'pending' && desktop === 'pending';
 
-  if (queued) return (
-    <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-slate-100 text-slate-600 border border-slate-200">
-      <Clock className="w-3.5 h-3.5 mr-1" /> Queued
-    </span>
-  );
-
-  if (retrying) return (
-    <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-purple-50 text-purple-700 border border-purple-200">
-      <RotateCcw className="w-3.5 h-3.5 mr-1 animate-spin" /> Retrying
-    </span>
-  );
-
-  if (running) return (
-    <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-blue-50 text-blue-700 border border-blue-200">
-      <Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" /> Running
-    </span>
-  );
-
-  if (timedOut && !failed) return (
-    <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-orange-50 text-orange-700 border border-orange-200">
-      <Timer className="w-3.5 h-3.5 mr-1" /> Timeout
-    </span>
-  );
+  if (queued) return <span className="status-badge text-muted-foreground" style={{ background: 'var(--background)' }}>Pending</span>;
+  if (retrying) return <span className="status-badge" style={{ background: 'var(--purple-bg)', color: 'var(--purple-text)' }}><span className="pulse-dot w-1.5 h-1.5 rounded-full" style={{ background: 'var(--purple-text)' }} />Retrying</span>;
+  if (running) return <span className="status-badge" style={{ background: 'var(--blue-bg)', color: 'var(--blue-text)' }}><span className="pulse-dot w-1.5 h-1.5 rounded-full" style={{ background: 'var(--blue-text)' }} />In Progress</span>;
 
   if (failed || timedOut) {
     const isRateLimit = mobileErrorCode === 'rate-limit' || desktopErrorCode === 'rate-limit';
-    const isNetwork = mobileErrorCode === 'network' || desktopErrorCode === 'network';
-    if (isRateLimit) return (
-      <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-amber-50 text-amber-700 border border-amber-200">
-        <AlertTriangle className="w-3.5 h-3.5 mr-1" /> Rate Limited
-      </span>
-    );
-    if (isNetwork) return (
-      <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-red-50 text-red-700 border border-red-200">
-        <WifiOff className="w-3.5 h-3.5 mr-1" /> Network Error
-      </span>
-    );
-    return (
-      <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-red-50 text-red-700 border border-red-200">
-        <XCircle className="w-3.5 h-3.5 mr-1" /> Failed
-      </span>
-    );
+    if (isRateLimit) return <span className="status-badge" style={{ background: 'var(--amber-bg)', color: 'var(--amber-text)' }}>Rate Limited</span>;
+    return <span className="status-badge" style={{ background: 'var(--red-bg)', color: 'var(--red-text)' }}>Failed</span>;
   }
 
-  if (completed) return (
-    <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-green-50 text-green-700 border border-green-200">
-      <CheckCircle2 className="w-3.5 h-3.5 mr-1" /> Success
-    </span>
-  );
-
+  if (completed) return <span className="status-badge" style={{ background: 'var(--green-bg)', color: 'var(--green-text)' }}><span className="w-1.5 h-1.5 rounded-full" style={{ background: 'var(--green-text)' }} />Success</span>;
   return null;
 }
 
@@ -136,7 +108,6 @@ export default function AuditProgressPage() {
     diagnosticsCollected: 0
   });
 
-  // We keep a ref to the last saved AuditState so retryFailedItems can merge against it
   const lastSavedStateRef = useRef<AuditState | null>(null);
 
   useEffect(() => {
@@ -177,7 +148,6 @@ export default function AuditProgressPage() {
       pageFailures: result.pageFailures,
       retryAttempt: attempt
     };
-    // Await the async save so IndexedDB write completes before "View Results" is enabled
     await saveAuditStateAsync(state);
     lastSavedStateRef.current = state;
     try {
@@ -185,7 +155,6 @@ export default function AuditProgressPage() {
     } catch {
       console.warn('Session storage full — results will load from IndexedDB');
     }
-    // Set the full runId AFTER save is confirmed so the link only becomes active once data is ready
     setSavedRunId(result.run.runId);
     return state;
   };
@@ -238,7 +207,6 @@ export default function AuditProgressPage() {
     }
   };
 
-  /** Retry only failed items, preserving all successful results */
   const handleRetryFailed = async () => {
     const prev = lastSavedStateRef.current;
     if (!prev) return;
@@ -255,7 +223,6 @@ export default function AuditProgressPage() {
     setError(null);
     setOverallProgress(0);
 
-    // Mark failed pages as 'retrying' in progress UI
     const failedLabels = new Set((prev.pageFailures ?? []).map(f => f.pageLabel));
     const failedDevices = new Map((prev.pageFailures ?? []).map(f => [`${f.pageLabel}:${f.device}`, true]));
     setPageProgress(current => current.map(p => {
@@ -313,7 +280,6 @@ export default function AuditProgressPage() {
     }
   };
 
-  /** Hard retry — re-runs the full audit from scratch */
   const handleFullRetry = () => {
     if (formData) {
       setStatus('running');
@@ -340,295 +306,207 @@ export default function AuditProgressPage() {
 
   if (!formData) {
     return (
-      <div className="min-h-screen bg-slate-50 flex items-center justify-center">
-        <Loader2 className="h-8 w-8 animate-spin text-blue-600" />
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <Loader2 className="h-8 w-8 animate-spin text-foreground" />
       </div>
     );
   }
 
   const canRetryFailed = failureCount > 0 && retryAttempt < MAX_RETRY_ATTEMPTS && !isRetrying;
   const retriesExhausted = failureCount > 0 && retryAttempt >= MAX_RETRY_ATTEMPTS;
+  const completedTasks = pageProgress.reduce((n, p) => n + (p.mobile === 'completed' ? 1 : 0) + (p.desktop === 'completed' ? 1 : 0), 0);
+  const totalTasks = pageProgress.length * 2;
 
   return (
-    <div className="bg-slate-50 min-h-[calc(100vh-4rem)] pb-24">
-      <main className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <div className="flex justify-between items-end mb-4">
-          <div>
-            <h1 className="text-3xl font-bold text-slate-900 tracking-tight">Audit in Progress</h1>
-            <div className="flex items-center gap-2 mt-2">
-              <span className="w-2 h-2 rounded-full bg-blue-500 animate-pulse"></span>
-              <p className="text-slate-500 font-medium">
-                {status === 'running'
-                  ? isRetrying
-                    ? `Retry attempt ${retryAttempt} of ${MAX_RETRY_ATTEMPTS} — only retrying failed items...`
-                    : 'Collecting PageSpeed Insights data with full diagnostics...'
-                  : status === 'completed'
-                    ? failureCount > 0
-                      ? `Audit complete with ${failureCount} page-device ${failureCount === 1 ? 'result' : 'results'} still unavailable`
-                      : retryAttempt > 0
-                        ? `All items recovered after ${retryAttempt} retry attempt${retryAttempt > 1 ? 's' : ''} ✓`
-                        : 'All pages audited successfully'
-                    : 'Audit encountered an error'}
-              </p>
-            </div>
-          </div>
-          <div className="text-right">
-            <h2 className="text-4xl font-black text-slate-900 tracking-tight">{Math.round(overallProgress)}%</h2>
-            <p className="text-xs font-bold tracking-widest text-slate-400 uppercase mt-1">Total Completion</p>
-          </div>
-        </div>
+    <div className="bg-background min-h-[calc(100vh-4rem)] pb-24">
+      <main className="max-w-[1024px] mx-auto px-6 py-10">
 
-        <Progress value={overallProgress} className="h-4 bg-slate-200 mb-8 rounded-full [&>div]:bg-slate-900" />
-
-        {/* Retry Attribution Banner */}
-        {isRetrying && (
-          <div className="mb-6 bg-purple-50 border border-purple-200 rounded-lg p-4 flex items-start gap-3">
-            <RotateCcw className="h-5 w-5 text-purple-600 mt-0.5 flex-shrink-0 animate-spin" />
-            <div>
-              <p className="text-purple-800 font-semibold text-sm">
-                Retry attempt {retryAttempt}/{MAX_RETRY_ATTEMPTS} — retrying {failureCount} failed item{failureCount !== 1 ? 's' : ''} only
-              </p>
-              <p className="text-purple-700 text-xs mt-1">
-                All previously successful results are preserved. Only the failed page-device combos are being re-audited.
-              </p>
-            </div>
-          </div>
-        )}
-
-        {/* Failure Banner */}
-        {status === 'completed' && failureCount > 0 && !isRetrying && (
-          <div className="mb-6 bg-amber-50 border border-amber-200 rounded-lg p-4 flex items-start gap-3">
-            <AlertTriangle className="h-5 w-5 text-amber-600 mt-0.5 flex-shrink-0" />
-            <div className="flex-1">
-              <p className="text-amber-800 font-semibold text-sm">
-                {failureCount} page-device {failureCount === 1 ? 'result' : 'results'} could not be retrieved
-              </p>
-              <p className="text-amber-700 text-xs mt-1">
-                All successful results are preserved. {retriesExhausted
-                  ? `Maximum retries (${MAX_RETRY_ATTEMPTS}) reached.`
-                  : `You can retry failed items (attempt ${retryAttempt + 1} of ${MAX_RETRY_ATTEMPTS}).`}
-              </p>
-            </div>
-          </div>
-        )}
-
-        {/* Retries exhausted notice */}
-        {retriesExhausted && (
-          <div className="mb-6 bg-red-50 border border-red-200 rounded-lg p-4 flex items-start gap-3">
-            <XCircle className="h-5 w-5 text-red-600 mt-0.5 flex-shrink-0" />
-            <div>
-              <p className="text-red-800 font-semibold text-sm">Maximum retries exhausted</p>
-              <p className="text-red-700 text-xs mt-1">
-                {failureCount} item{failureCount !== 1 ? 's' : ''} could not be recovered after {MAX_RETRY_ATTEMPTS} attempts.
-                These may be due to API rate limits or the page being unreachable.
-                You can still view and export the results for successfully audited pages.
-              </p>
-            </div>
-          </div>
-        )}
-
-        {/* Data Collection Stats */}
-        {status === 'completed' && (
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-            <Card className="bg-blue-50 border-blue-200">
-              <CardContent className="p-4 flex items-center gap-3">
-                <Activity className="h-5 w-5 text-blue-600" />
-                <div>
-                  <p className="text-xs text-blue-600 font-medium uppercase">Metrics Collected</p>
-                  <p className="text-xl font-bold text-blue-900">{stats.metricsCollected}</p>
-                </div>
-              </CardContent>
-            </Card>
-            <Card className="bg-emerald-50 border-emerald-200">
-              <CardContent className="p-4 flex items-center gap-3">
-                <BarChart3 className="h-5 w-5 text-emerald-600" />
-                <div>
-                  <p className="text-xs text-emerald-600 font-medium uppercase">Category Scores</p>
-                  <p className="text-xl font-bold text-emerald-900">{stats.categoryScoresCollected}</p>
-                </div>
-              </CardContent>
-            </Card>
-            <Card className="bg-amber-50 border-amber-200">
-              <CardContent className="p-4 flex items-center gap-3">
-                <FileSearch className="h-5 w-5 text-amber-600" />
-                <div>
-                  <p className="text-xs text-amber-600 font-medium uppercase">Diagnostic Items</p>
-                  <p className="text-xl font-bold text-amber-900">{stats.diagnosticsCollected}</p>
-                </div>
-              </CardContent>
-            </Card>
-          </div>
-        )}
-
-        <Card className="mb-8 rounded-xl shadow-sm border-slate-200 overflow-hidden">
-          <div className="p-6 bg-white border-b border-slate-100 flex justify-between items-start">
-            <div className="flex gap-4 items-center">
-              <div className="w-10 h-10 rounded-full bg-slate-50 border border-slate-200 flex items-center justify-center">
-                <RefreshCcw className={`w-5 h-5 text-slate-600 ${status === 'running' ? 'animate-spin' : ''}`} />
-              </div>
-              <div>
-                <h3 className="text-lg font-bold text-slate-900">Audit Pipeline Status</h3>
-                <p className="text-sm text-slate-500 mt-0.5">
-                  {status === 'running'
-                    ? isRetrying ? 'Retrying only the failed page-device combos...' : 'Collecting PageSpeed Insights data with full diagnostics...'
-                    : status === 'completed'
-                      ? 'Audit complete with category scores and diagnostic details'
-                      : 'Audit failed — see error details below'}
-                </p>
-              </div>
-            </div>
-            <div className="bg-slate-100 text-slate-600 px-3 py-1 rounded-md text-xs font-mono font-medium border border-slate-200">
-              Run ID: {runId}
-            </div>
-          </div>
-          <CardContent className="p-0 bg-white">
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm text-left">
-                <thead className="text-xs text-slate-500 bg-slate-50 border-b border-slate-100">
-                  <tr>
-                    <th className="px-6 py-4 font-semibold">Page Label</th>
-                    <th className="px-6 py-4 font-semibold">Target URL</th>
-                    <th className="px-6 py-4 font-semibold text-center w-28">Mobile</th>
-                    <th className="px-6 py-4 font-semibold text-center w-28">Desktop</th>
-                    <th className="px-6 py-4 font-semibold text-right">Overall Status</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {pageProgress.map((page, index) => (
-                    <tr key={index} className="border-b border-slate-100 last:border-0 hover:bg-slate-50/50 transition-colors">
-                      <td className="px-6 py-4 font-semibold text-slate-900">{page.pageLabel}</td>
-                      <td className="px-6 py-4 text-slate-500 font-mono text-xs max-w-xs truncate">{page.url}</td>
-                      <td className="px-6 py-4 text-center">
-                        <div className="inline-flex items-center gap-2 justify-center">
-                          <Smartphone className={`w-4 h-4 ${page.mobile === 'pending' ? 'text-slate-300' : 'text-slate-600'}`} />
-                          <StatusIcon status={page.mobile} />
-                        </div>
-                      </td>
-                      <td className="px-6 py-4 text-center">
-                        <div className="inline-flex items-center gap-2 justify-center">
-                          <Monitor className={`w-4 h-4 ${page.desktop === 'pending' ? 'text-slate-300' : 'text-slate-600'}`} />
-                          <StatusIcon status={page.desktop} />
-                        </div>
-                      </td>
-                      <td className="px-6 py-4 text-right">
-                        <RowStatusBadge
-                          mobile={page.mobile}
-                          desktop={page.desktop}
-                          mobileErrorCode={page.mobileErrorCode}
-                          desktopErrorCode={page.desktopErrorCode}
-                        />
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            <div className="bg-slate-50 border-t border-slate-100 p-4 flex justify-between items-center text-xs font-medium text-slate-500">
-              <div className="flex items-center gap-6">
-                <span className="flex items-center gap-2"><span className="w-2 h-2 rounded-full bg-blue-500"></span> Running</span>
-                <span className="flex items-center gap-2"><span className="w-2 h-2 rounded-full bg-green-500"></span> Completed</span>
-                <span className="flex items-center gap-2"><span className="w-2 h-2 rounded-full bg-red-500"></span> Failed</span>
-                <span className="flex items-center gap-2"><span className="w-2 h-2 rounded-full bg-orange-500"></span> Timeout</span>
-                <span className="flex items-center gap-2"><span className="w-2 h-2 rounded-full bg-purple-500"></span> Retrying</span>
-              </div>
-              <div>
-                {status === 'running' ? 'Collecting full diagnostic data...' : status === 'completed' ? 'Audit Complete' : 'Audit Failed'}
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Info Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-12">
-          <Card className="rounded-xl bg-slate-50/50 border-slate-200/60 shadow-none">
-            <CardContent className="p-4 flex items-center gap-4">
-              <div className="w-10 h-10 rounded-lg bg-white border border-slate-200 flex items-center justify-center shadow-sm">
-                <Smartphone className="w-5 h-5 text-slate-700" />
-              </div>
-              <div>
-                <h4 className="text-sm font-bold text-slate-900">Mobile Emulation</h4>
-                <p className="text-xs text-slate-500 mt-0.5">Moto G Power (3G) · 400×800</p>
-              </div>
-            </CardContent>
-          </Card>
-          <Card className="rounded-xl bg-slate-50/50 border-slate-200/60 shadow-none">
-            <CardContent className="p-4 flex items-center gap-4">
-              <div className="w-10 h-10 rounded-lg bg-white border border-slate-200 flex items-center justify-center shadow-sm">
-                <Monitor className="w-5 h-5 text-slate-700" />
-              </div>
-              <div>
-                <h4 className="text-sm font-bold text-slate-900">Desktop Emulation</h4>
-                <p className="text-xs text-slate-500 mt-0.5">Full HD · Broadband (Fiber)</p>
-              </div>
-            </CardContent>
-          </Card>
-          <Card className="rounded-xl bg-slate-50/50 border-slate-200/60 shadow-none">
-            <CardContent className="p-4 flex items-center gap-4">
-              <div className="w-10 h-10 rounded-lg bg-white border border-slate-200 flex items-center justify-center shadow-sm">
-                <Activity className="w-5 h-5 text-slate-700" />
-              </div>
-              <div>
-                <h4 className="text-sm font-bold text-slate-900">Audit Protocol</h4>
-                <p className="text-xs text-slate-500 mt-0.5">Core Web Vitals · PSI v5 · 65s timeout</p>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-
-        {/* Sticky Bottom Feedback Bar */}
-        <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 p-4 z-40 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)]">
-          <div className="max-w-6xl mx-auto flex items-center justify-end gap-4">
+        {/* Progress Hero — Centered */}
+        <div className="text-center mb-10">
+          <div className="flex items-center justify-center gap-2.5 mb-3">
             {status === 'running' ? (
               <>
-                <span className="text-sm italic text-slate-400 tracking-wide">
-                  {isRetrying ? `Retrying failed items (attempt ${retryAttempt}/${MAX_RETRY_ATTEMPTS})...` : 'Collecting diagnostics... do not close this window.'}
-                </span>
-                <Button disabled className="bg-slate-100 text-slate-500 border border-slate-200 h-12 px-8 rounded-md font-semibold">
-                  Awaiting Completion...
-                </Button>
+                <span className="pulse-dot w-2.5 h-2.5 rounded-full" style={{ background: 'var(--blue-text)' }} />
+                <span className="text-[13px] font-semibold uppercase tracking-[0.1em]" style={{ color: 'var(--blue-text)' }}>Running Audit</span>
               </>
-            ) : status === 'failed' ? (
+            ) : status === 'completed' ? (
               <>
-                <span className="text-sm font-semibold text-red-600 tracking-wide">{error}</span>
-                <Button onClick={handleFullRetry} className="bg-slate-900 hover:bg-slate-800 text-white h-12 px-8 rounded-md font-semibold">
-                  <RotateCcw className="h-4 w-4 mr-2" /> Retry Full Audit
-                </Button>
+                <span className="w-2.5 h-2.5 rounded-full" style={{ background: failureCount > 0 ? 'var(--amber-text)' : 'var(--green-text)' }} />
+                <span className="text-[13px] font-semibold uppercase tracking-[0.1em]" style={{ color: failureCount > 0 ? 'var(--amber-text)' : 'var(--green-text)' }}>
+                  {failureCount > 0 ? 'Completed with Warnings' : 'Audit Complete'}
+                </span>
               </>
             ) : (
               <>
-                {canRetryFailed && (
-                  <Button
-                    onClick={handleRetryFailed}
-                    variant="outline"
-                    className="border-amber-300 text-amber-700 hover:bg-amber-50 h-12 px-6 rounded-md font-semibold"
-                  >
-                    <RotateCcw className="h-4 w-4 mr-2" />
-                    Retry {failureCount} Failed Item{failureCount !== 1 ? 's' : ''}
-                    <span className="ml-2 text-xs opacity-70">({retryAttempt}/{MAX_RETRY_ATTEMPTS} used)</span>
-                  </Button>
-                )}
-                {retriesExhausted && (
-                  <Button onClick={handleFullRetry} variant="outline" className="border-slate-300 text-slate-600 h-12 px-6">
-                    <RotateCcw className="h-4 w-4 mr-2" /> Full Re-run
-                  </Button>
-                )}
-                {isSaving ? (
-                  <Button disabled className="bg-slate-400 text-white h-12 px-8 rounded-md font-semibold cursor-not-allowed">
-                    <Loader2 className="h-4 w-4 mr-2 animate-spin" /> Saving Results...
-                  </Button>
-                ) : savedRunId ? (
-                  <Link href={`/results?runId=${savedRunId}`}>
-                    <Button className="bg-slate-900 hover:bg-slate-800 text-white h-12 px-8 rounded-md font-semibold shadow-md">
-                      View Results
-                      <ArrowRight className="h-5 w-5 ml-2" />
-                    </Button>
-                  </Link>
-                ) : null}
+                <span className="w-2.5 h-2.5 rounded-full" style={{ background: 'var(--red-text)' }} />
+                <span className="text-[13px] font-semibold uppercase tracking-[0.1em]" style={{ color: 'var(--red-text)' }}>Audit Failed</span>
               </>
             )}
           </div>
+          <div className="count-up font-mono text-[52px] font-bold text-foreground tracking-[-0.04em]">{Math.round(overallProgress)}%</div>
+          <p className="text-muted-foreground text-sm mt-2">
+            {status === 'running'
+              ? isRetrying
+                ? `Retrying failed items (attempt ${retryAttempt}/${MAX_RETRY_ATTEMPTS})...`
+                : 'Collecting PageSpeed Insights data...'
+              : status === 'completed'
+                ? failureCount > 0
+                  ? `${failureCount} item${failureCount !== 1 ? 's' : ''} could not be retrieved`
+                  : 'All pages audited successfully'
+                : error || 'Unknown error'}
+          </p>
+          <div className="max-w-[480px] mx-auto mt-6 h-2 bg-background rounded-full overflow-hidden border border-border/50">
+            <div className="h-full rounded-full progress-anim" style={{ width: `${overallProgress}%`, background: `linear-gradient(90deg, color-mix(in srgb, var(--blue-text) 60%, transparent), var(--blue-text))` }} />
+          </div>
+        </div>
+
+        {/* Stats — Double Bezel */}
+        <div className="grid grid-cols-3 gap-4 mb-10">
+          <div className="double-bezel">
+            <div className="double-bezel-inner text-center !py-4 !px-6">
+              <div className="w-8 h-8 rounded-lg mx-auto mb-2 flex items-center justify-center" style={{ background: 'var(--blue-bg)' }}>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--blue-text)" strokeWidth={1.5}><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+              </div>
+              <div className="count-up font-mono text-[26px] font-bold text-foreground">{stats.metricsCollected}</div>
+              <div className="text-muted-foreground text-xs mt-1">Metrics Collected</div>
+            </div>
+          </div>
+          <div className="double-bezel">
+            <div className="double-bezel-inner text-center !py-4 !px-6">
+              <div className="w-8 h-8 rounded-lg mx-auto mb-2 flex items-center justify-center" style={{ background: 'var(--green-bg)' }}>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--green-text)" strokeWidth={1.5}><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+              </div>
+              <div className="count-up font-mono text-[26px] font-bold text-foreground">{stats.diagnosticsCollected}</div>
+              <div className="text-muted-foreground text-xs mt-1">Diagnostics Found</div>
+            </div>
+          </div>
+          <div className="double-bezel">
+            <div className="double-bezel-inner text-center !py-4 !px-6">
+              <div className="w-8 h-8 rounded-lg mx-auto mb-2 flex items-center justify-center" style={{ background: 'var(--amber-bg)' }}>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--amber-text)" strokeWidth={1.5}><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/></svg>
+              </div>
+              <div className="count-up font-mono text-[26px] font-bold text-foreground">{stats.categoryScoresCollected}</div>
+              <div className="text-muted-foreground text-xs mt-1">Categories Scored</div>
+            </div>
+          </div>
+        </div>
+
+        {/* Pipeline Table */}
+        <div className="bg-card border border-border rounded-2xl overflow-hidden mb-8">
+          <div className="flex items-center justify-between px-5 py-4 border-b border-border/50">
+            <h2 className="text-[16px] font-bold text-foreground tracking-normal">Audit Pipeline Status</h2>
+            <span className="font-mono text-muted-foreground text-[11px] bg-background px-2.5 py-1 rounded-md">Run: {runId}</span>
+          </div>
+          <table className="w-full border-collapse text-[13px]">
+            <thead>
+              <tr className="border-b border-border/50">
+                <th className="text-left px-5 py-2.5 text-muted-foreground text-[11px] font-semibold uppercase tracking-[0.08em]">Page</th>
+                <th className="text-left px-5 py-2.5 text-muted-foreground text-[11px] font-semibold uppercase tracking-[0.08em]">URL</th>
+                <th className="text-center px-5 py-2.5 text-muted-foreground text-[11px] font-semibold uppercase tracking-[0.08em]">Mobile</th>
+                <th className="text-center px-5 py-2.5 text-muted-foreground text-[11px] font-semibold uppercase tracking-[0.08em]">Desktop</th>
+                <th className="text-center px-5 py-2.5 text-muted-foreground text-[11px] font-semibold uppercase tracking-[0.08em]">Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {pageProgress.map((page, index) => (
+                <tr key={index} className="table-row-hover border-b border-border/30 last:border-0">
+                  <td className="px-5 py-3.5 font-medium text-foreground">{page.pageLabel}</td>
+                  <td className="px-5 py-3.5 font-mono text-muted-foreground text-xs max-w-[200px] truncate">
+                    {page.url.replace(/^https?:\/\//, '').split('/').slice(0, 2).join('/')}
+                  </td>
+                  <td className="px-5 py-3.5 text-center"><StatusCell status={page.mobile} /></td>
+                  <td className="px-5 py-3.5 text-center"><StatusCell status={page.desktop} /></td>
+                  <td className="px-5 py-3.5 text-center">
+                    <RowStatusBadge mobile={page.mobile} desktop={page.desktop} mobileErrorCode={page.mobileErrorCode} desktopErrorCode={page.desktopErrorCode} />
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        {/* Info Cards */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="bg-card border border-border rounded-2xl p-5">
+            <h3 className="text-muted-foreground text-[11px] font-semibold uppercase tracking-[0.08em] mb-3">Device Emulation</h3>
+            <div className="flex flex-col gap-2">
+              <div className="flex justify-between text-sm"><span className="text-muted-foreground">Mobile</span><span className="text-foreground font-medium">Moto G Power (412 x 823)</span></div>
+              <div className="flex justify-between text-sm"><span className="text-muted-foreground">Desktop</span><span className="text-foreground font-medium">Full HD (1920 x 1080)</span></div>
+            </div>
+          </div>
+          <div className="bg-card border border-border rounded-2xl p-5">
+            <h3 className="text-muted-foreground text-[11px] font-semibold uppercase tracking-[0.08em] mb-3">Protocol</h3>
+            <div className="flex flex-col gap-2">
+              <div className="flex justify-between text-sm"><span className="text-muted-foreground">Method</span><span className="text-foreground font-medium">B.L.A.S.T. v1.0</span></div>
+              <div className="flex justify-between text-sm"><span className="text-muted-foreground">Pipeline</span><span className="text-foreground font-medium">{(() => { const c = getPageConcurrency(formData?.pages.length ?? 0); return c <= 1 ? 'Sequential (1 at a time)' : `Parallel (${c} at a time)`; })()}</span></div>
+            </div>
+          </div>
         </div>
       </main>
+
+      {/* Sticky Bottom */}
+      <div className="fixed bottom-0 left-0 right-0 z-40 backdrop-blur-xl border-t border-border" style={{ background: 'color-mix(in srgb, var(--card) 80%, transparent)' }}>
+        <div className="max-w-[1024px] mx-auto px-6 flex items-center justify-between h-16">
+          <div className="flex items-center gap-2">
+            {status === 'running' && <span className="pulse-dot w-2 h-2 rounded-full" style={{ background: 'var(--blue-text)' }} />}
+            <span className="text-muted-foreground text-sm">
+              {status === 'running'
+                ? `Audit in progress — ${completedTasks} of ${totalTasks} tasks completed`
+                : status === 'completed'
+                  ? failureCount > 0 ? `Completed with ${failureCount} issue${failureCount !== 1 ? 's' : ''}` : 'Audit complete'
+                  : 'Audit failed'}
+            </span>
+          </div>
+          <div className="flex gap-3">
+            {status === 'running' ? (
+              <button className="px-4 py-2 text-[13px] font-medium border border-border rounded-[10px] bg-transparent text-muted-foreground hover:bg-muted hover:text-foreground transition-colors cursor-pointer">
+                Cancel Audit
+              </button>
+            ) : status === 'failed' ? (
+              <Button onClick={handleFullRetry} className="bg-primary hover:bg-primary/90 text-primary-foreground h-10 px-6 rounded-[10px] font-medium">
+                <RotateCcw className="h-4 w-4 mr-2" /> Retry Full Audit
+              </Button>
+            ) : (
+              <>
+                {canRetryFailed && (
+                  <button
+                    onClick={handleRetryFailed}
+                    className="px-4 py-2 text-sm font-medium border rounded-[10px] cursor-pointer transition-colors"
+                    style={{ borderColor: 'var(--amber-text)', color: 'var(--amber-text)', background: 'transparent' }}
+                  >
+                    <RotateCcw className="h-3.5 w-3.5 mr-1.5 inline" />
+                    Retry {failureCount} Failed
+                  </button>
+                )}
+                {retriesExhausted && (
+                  <Button onClick={handleFullRetry} variant="outline" className="border-border text-muted-foreground h-10 px-4 rounded-[10px]">
+                    <RotateCcw className="h-4 w-4 mr-2" /> Full Re-run
+                  </Button>
+                )}
+              </>
+            )}
+            {status === 'running' ? (
+              <button className="inline-flex items-center gap-2 px-5 py-2.5 text-sm font-medium bg-primary text-primary-foreground rounded-[10px] opacity-40 cursor-not-allowed border-none" disabled>
+                View Results <ArrowRight className="h-4 w-4" />
+              </button>
+            ) : isSaving ? (
+              <button className="inline-flex items-center gap-2 px-5 py-2.5 text-sm font-medium bg-muted text-muted-foreground rounded-[10px] cursor-not-allowed border-none" disabled>
+                <Loader2 className="h-4 w-4 animate-spin" /> Saving Results...
+              </button>
+            ) : savedRunId ? (
+              <Link href={`/results?runId=${savedRunId}`}>
+                <button className="inline-flex items-center gap-2 px-5 py-2.5 text-sm font-medium bg-primary text-primary-foreground rounded-[10px] hover:opacity-85 transition-all cursor-pointer border-none">
+                  View Results <ArrowRight className="h-4 w-4" />
+                </button>
+              </Link>
+            ) : status === 'failed' ? null : (
+              <button className="inline-flex items-center gap-2 px-5 py-2.5 text-sm font-medium bg-primary text-primary-foreground rounded-[10px] opacity-40 cursor-not-allowed border-none" disabled>
+                View Results <ArrowRight className="h-4 w-4" />
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
     </div>
   );
 }

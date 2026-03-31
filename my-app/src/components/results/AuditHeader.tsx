@@ -1,7 +1,7 @@
 'use client';
 
 import { Button } from '@/components/ui/button';
-import { ArrowLeft, Download, FileText, Package, Upload } from 'lucide-react';
+import { ArrowLeft, Download, FileText, Package, Upload, X } from 'lucide-react';
 import Link from 'next/link';
 import { AuditRun } from '@/types';
 import { formatDate } from '@/lib/utils';
@@ -26,22 +26,22 @@ export function AuditHeader({
   onClearBaseline
 }: AuditHeaderProps) {
   return (
-    <header className="bg-white border-b border-slate-200 sticky top-0 z-30 shadow-sm">
+    <header className="bg-card/80 backdrop-blur-xl border-b border-border sticky top-0 z-30 shadow-sm">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-20 flex items-center justify-between">
         <div className="flex items-center gap-4">
           <Link href="/">
-            <Button variant="ghost" size="icon" className="text-slate-500">
+            <Button variant="ghost" size="icon" className="text-muted-foreground">
               <ArrowLeft className="h-5 w-5" />
             </Button>
           </Link>
           <div>
             <div className="flex items-center gap-2">
-              <h1 className="text-xl font-bold text-slate-900 tracking-tight">{run.projectName}</h1>
-              <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-slate-100 text-slate-500 border border-slate-200 uppercase tracking-wider">
+              <h1 className="text-xl font-bold text-foreground tracking-tight">{run.projectName}</h1>
+              <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-muted text-muted-foreground border border-border uppercase tracking-wider">
                 {run.environment}
               </span>
             </div>
-            <p className="text-xs text-slate-500 font-medium">
+            <p className="text-xs text-muted-foreground font-medium">
               {run.auditLabel} · {formatDate(run.generatedAt)}
             </p>
           </div>
@@ -49,35 +49,37 @@ export function AuditHeader({
 
         <div className="flex items-center gap-2">
           {baselineProjectName && (
-            <div className="flex items-center gap-2 mr-4 px-3 py-1.5 bg-blue-50 border border-blue-100 rounded-md">
-              <span className="text-xs font-semibold text-blue-700">Comparing to: {baselineProjectName}</span>
-              <Button 
-                variant="ghost" 
-                size="icon" 
-                className="h-4 w-4 text-blue-400 hover:text-blue-600 hover:bg-transparent"
+            <div className="flex items-center gap-1 mr-4 bg-primary/10 border border-primary/20 rounded-md">
+              <Link href="/compare/" className="px-3 py-1.5 hover:bg-primary/15 rounded-l-md transition-colors">
+                <span className="text-xs font-semibold text-primary">Comparing to: {baselineProjectName}</span>
+              </Link>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-7 w-7 text-primary/60 hover:text-primary hover:bg-primary/15 rounded-r-md"
                 onClick={onClearBaseline}
               >
-                <Upload className="h-3 w-3 rotate-180" />
+                <X className="h-3 w-3" />
               </Button>
             </div>
           )}
           
-          <Button variant="outline" size="sm" className="hidden sm:flex text-slate-700" onClick={onOpenComparison}>
+          <Button variant="outline" size="sm" className="hidden sm:flex text-foreground" onClick={onOpenComparison}>
             <Upload className="h-4 w-4 mr-2" />
             Compare
           </Button>
           
-          <Button variant="outline" size="sm" className="hidden md:flex text-slate-700" onClick={onDownloadJSON}>
+          <Button variant="outline" size="sm" className="hidden md:flex text-foreground" onClick={onDownloadJSON}>
             <FileText className="h-4 w-4 mr-2" />
             JSON
           </Button>
           
-          <Button variant="outline" size="sm" className="hidden md:flex text-slate-700" onClick={onDownloadPDF}>
+          <Button variant="outline" size="sm" className="hidden md:flex text-foreground" onClick={onDownloadPDF}>
             <FileText className="h-4 w-4 mr-2" />
             PDF Report
           </Button>
           
-          <Button className="bg-slate-900 hover:bg-slate-800 text-white" onClick={onDownloadPackage}>
+          <Button className="bg-primary hover:bg-primary/90 text-primary-foreground" onClick={onDownloadPackage}>
             <Download className="h-4 w-4 mr-2" />
             Export All
           </Button>

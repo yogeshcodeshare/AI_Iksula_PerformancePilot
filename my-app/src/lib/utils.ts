@@ -18,13 +18,18 @@ export function classifyMetric(value: number, metric: MetricName): Status {
 
 /**
  * Canonical formatMetricValue — used everywhere in UI and export.
- * LCP, FCP, TTFB: show in seconds if >= 1000ms, otherwise milliseconds.
+ * LCP, FCP: show in seconds if >= 1000ms, otherwise milliseconds.
+ * TTFB: always in seconds.
  * INP: always milliseconds.
  * CLS: 2 decimal places (unitless).
  * performance_score: integer (no unit suffix).
  */
 export function formatMetricValue(value: number, metric: MetricName | string): string {
-  if (metric === 'LCP' || metric === 'FCP' || metric === 'TTFB') {
+  if (metric === 'TTFB') {
+    return `${(value / 1000).toFixed(1)} s`;
+  }
+
+  if (metric === 'LCP' || metric === 'FCP') {
     if (value >= 1000) {
       return `${(value / 1000).toFixed(1)} s`;
     }

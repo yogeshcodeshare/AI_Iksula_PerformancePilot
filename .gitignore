@@ -16,3 +16,9 @@ yarn-error.log*
 *.temp
 .claude/
 my-app/dist/
+
+# Screenshots (local reference only)
+Screenshots/
+
+# Node compile cache (build artifact)
+node-compile-cache/

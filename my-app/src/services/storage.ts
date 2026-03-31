@@ -1,5 +1,6 @@
 // Storage service - localStorage persistence
 import { AuditState, ReportPackage, ComparisonResult } from '@/types';
+import { calculateOverallHealth } from '@/lib/utils';
 
 const STORAGE_KEY_CURRENT = 'ai-performance-audit-agent-current';
 const STORAGE_KEY_RECENT = 'ai-performance-audit-agent-recent-audits';
@@ -195,10 +196,8 @@ function addToRecentAudits(state: AuditState): void {
     const recent = getRecentAudits();
     const { run, pages, metrics } = state;
 
-    // Calculate overall health
-    const goodCount = metrics.filter(m => m.status === 'good').length;
-    const totalCount = metrics.length;
-    const overallHealth = totalCount > 0 ? Math.round((goodCount / totalCount) * 100) : 0;
+    // Calculate overall health (weighted: good=100, needs-improvement=50, poor=0)
+    const overallHealth = calculateOverallHealth(metrics);
 
     const audit: RecentAudit = {
       runId: run.runId,
@@ -288,22 +287,56 @@ export function getSettings(): AuditSettings {
   }
 }
 
-// Save uploaded baseline report for comparison
-export function saveBaselineReport(report: ReportPackage): void {
+// Save uploaded baseline report for comparison (IndexedDB primary, localStorage fallback)
+const BASELINE_DB_KEY = 'baseline-report';
+const BASELINE_LS_KEY = 'ai-performance-audit-baseline';
+
+export async function saveBaselineReportAsync(report: ReportPackage): Promise<void> {
   if (typeof window === 'undefined') return;
 
   try {
-    localStorage.setItem('ai-performance-audit-baseline', JSON.stringify(report));
+    await dbSet(BASELINE_DB_KEY, report);
   } catch (error) {
-    console.error('Failed to save baseline report:', error);
+    console.error('Failed to save baseline to IndexedDB, falling back to localStorage:', error);
+    try {
+      localStorage.setItem(BASELINE_LS_KEY, JSON.stringify(report));
+    } catch (lsError) {
+      console.error('Failed to save baseline to localStorage:', lsError);
+      throw lsError;
+    }
   }
+}
+
+export function saveBaselineReport(report: ReportPackage): void {
+  // Fire-and-forget async save for backward compatibility
+  saveBaselineReportAsync(report).catch(() => {});
+}
+
+export async function getBaselineReportAsync(): Promise<ReportPackage | null> {
+  if (typeof window === 'undefined') return null;
+
+  try {
+    // Try IndexedDB first
+    const report = await dbGet<ReportPackage>(BASELINE_DB_KEY);
+    if (report) {
+      if (!report.categoryScores) report.categoryScores = [];
+      if (!report.diagnostics) report.diagnostics = [];
+      if (!report.cwvAssessments) report.cwvAssessments = [];
+      return report;
+    }
+  } catch (error) {
+    console.error('Failed to get baseline from IndexedDB:', error);
+  }
+
+  // Fall back to localStorage
+  return getBaselineReport();
 }
 
 export function getBaselineReport(): ReportPackage | null {
   if (typeof window === 'undefined') return null;
 
   try {
-    const data = localStorage.getItem('ai-performance-audit-baseline');
+    const data = localStorage.getItem(BASELINE_LS_KEY);
     if (!data) return null;
 
     const report = JSON.parse(data) as ReportPackage;
@@ -320,9 +353,18 @@ export function getBaselineReport(): ReportPackage | null {
   }
 }
 
+export async function clearBaselineReportAsync(): Promise<void> {
+  if (typeof window === 'undefined') return;
+  localStorage.removeItem(BASELINE_LS_KEY);
+  try {
+    await dbRemove(BASELINE_DB_KEY);
+  } catch { /* ignore */ }
+}
+
 export function clearBaselineReport(): void {
   if (typeof window === 'undefined') return;
-  localStorage.removeItem('ai-performance-audit-baseline');
+  localStorage.removeItem(BASELINE_LS_KEY);
+  dbRemove(BASELINE_DB_KEY).catch(() => {});
 }
 
 // Save comparison result
