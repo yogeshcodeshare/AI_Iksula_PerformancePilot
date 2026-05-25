@@ -235,7 +235,22 @@ export type AuditErrorCode =
   | 'referer-blocked'
   | 'permission-denied'
   | 'quota-exhausted'
-  | 'preflight-failed';
+  | 'preflight-failed'
+  /**
+   * PSI's Lighthouse run failed on a specific page (HTTP 500
+   * "Lighthouse returned error: Something went wrong" or "NO_FCP").
+   *
+   * Confirmed via direct PSI test 2026-05-25: converse.com.au/sale and
+   * /men exhibit this — same key, same time, /sale returns 200 in 108 s,
+   * /men returns 500 after 93 s. 30 s wait + retry can recover; not
+   * always. This is NOT a global throttle — it's per-page, often caused
+   * by Imperva/Cloudflare bot challenges, heavy 3rd-party JS, or pages
+   * that don't paint within Lighthouse's window.
+   *
+   * Treat differently from `api-error`: in-line single retry with 30 s
+   * cooldown, don't count toward audit-wide consecutive-failure abort.
+   */
+  | 'psi-page-error';
 
 export interface PageProgressUpdate {
   pageLabel: string;
@@ -283,6 +298,13 @@ const DEFAULT_RATE_LIMIT_COOLDOWN_MS = 60_000;
 
 /** Cap on Retry-After honored from server (avoid 1-hour stalls) */
 const MAX_RETRY_AFTER_MS = 180_000;
+
+/**
+ * When PSI returns "Lighthouse returned error" (psi-page-error) we do one
+ * in-line retry with this cooldown. Web research and our 2026-05-25 live
+ * test both confirm ~30 s is the sweet spot.
+ */
+const PSI_PAGE_ERROR_RETRY_DELAY_MS = 30_000;
 
 /**
  * Dynamic concurrency based on page count and API key availability.
@@ -382,12 +404,40 @@ function classifyHttpError(status: number, errorBody: { error?: { message?: stri
     };
   }
 
-  // 5xx — per web research, PSI returns 500 "Lighthouse returned error" both for genuine
-  // page failures AND as an undocumented soft-throttle. Treat as api-error; the audit
-  // orchestrator will apply a long cooldown when these accumulate.
+  // 5xx — disambiguate page-level Lighthouse failures from generic API errors.
+  //
+  // PSI returns 500 "Lighthouse returned error: Something went wrong" (or
+  // NO_FCP, NO_DOCUMENT_REQUEST, etc.) for pages Lighthouse couldn't audit.
+  // Direct test confirmed this is per-page and per-time — same key, /sale OK,
+  // /men 500 — and a 30s retry sometimes succeeds. The page may simply be
+  // bot-protected (Imperva, Cloudflare) or have long main-thread JS that
+  // prevents FCP. NOT a global throttle.
+  if (status === 500 || status === 502 || status === 503) {
+    const looksLikePageError = lower.includes('lighthouse returned error') ||
+      lower.includes('something went wrong') ||
+      lower.includes('no_fcp') ||
+      lower.includes('no_document_request');
+    if (looksLikePageError) {
+      return {
+        code: 'psi-page-error',
+        message:
+          msg ||
+          'Lighthouse could not analyze this page. Common causes: bot ' +
+          'protection (Imperva/Cloudflare), heavy third-party scripts, or ' +
+          'pages that never reach First Contentful Paint within the test window.',
+      };
+    }
+    // Generic 5xx — Google-side issue, not page-side. Worth a normal retry.
+    return {
+      code: 'api-error',
+      message: `PageSpeed API error ${status}: ${msg || 'server error'}`,
+    };
+  }
+
+  // Default — anything else (4xx not handled above, weird statuses)
   return {
     code: 'api-error',
-    message: `PageSpeed API error ${status}: ${msg || 'Lighthouse returned error'}`,
+    message: `PageSpeed API error ${status}: ${msg || 'unknown error'}`,
   };
 }
 
@@ -501,8 +551,13 @@ async function fetchPageSpeed(url: string, device: Device, timeoutMs: number = P
  * Returns the error code if preflight failed, null if everything looks healthy.
  */
 export async function preflightCheck(): Promise<{ code: AuditErrorCode; message: string } | null> {
+  // 20 s — bumped from 10 s after observing the prior preflight cancelling at
+  // 9.96 s on real users. PSI for google.com normally returns in <1 s but the
+  // outbound path from some networks (corp proxies, Vercel cold edges) can be
+  // slower. Better a 20 s preflight that catches the obvious config errors
+  // than a fast preflight that gives false negatives.
   try {
-    await fetchPageSpeed('https://www.google.com/', 'mobile', 10_000);
+    await fetchPageSpeed('https://www.google.com/', 'mobile', 20_000);
     return null;
   } catch (e) {
     const code = (e as { errorCode?: AuditErrorCode }).errorCode;
@@ -1313,8 +1368,27 @@ async function auditPageDevice(
   timeoutMs: number = PAGESPEED_TIMEOUT_MS
 ): Promise<PageDeviceResult> {
   try {
-    // Try PageSpeed first (throttled to avoid API burst pressure)
-    const psResult = await throttledFetchPageSpeed(url, device, timeoutMs);
+    // Try PageSpeed first (throttled to avoid API burst pressure).
+    //
+    // For the specific 'psi-page-error' code (HTTP 500 "Lighthouse returned
+    // error" / "Something went wrong" / NO_FCP) we attempt ONE in-line retry
+    // with a 30 s cooldown — direct test 2026-05-25 confirmed this is the
+    // sweet spot for pages whose Lighthouse run sometimes hits an Imperva
+    // challenge or runs out of paint window. We do NOT retry for any other
+    // error code here; those are handled by the outer audit orchestrator.
+    let psResult: PageSpeedResponse;
+    try {
+      psResult = await throttledFetchPageSpeed(url, device, timeoutMs);
+    } catch (firstErr) {
+      const code = (firstErr as { errorCode?: AuditErrorCode }).errorCode;
+      if (code === 'psi-page-error') {
+        console.warn(`[AuditPageDevice] psi-page-error for ${url} (${device}); waiting ${PSI_PAGE_ERROR_RETRY_DELAY_MS}ms and retrying once`);
+        await new Promise(r => setTimeout(r, PSI_PAGE_ERROR_RETRY_DELAY_MS));
+        psResult = await throttledFetchPageSpeed(url, device, timeoutMs);
+      } else {
+        throw firstErr;
+      }
+    }
 
     if (isComplete(psResult)) {
       const hasUrlLevelCrux = psResult.loadingExperience?.metrics?.LARGEST_CONTENTFUL_PAINT_MS?.percentile !== undefined;
@@ -1709,6 +1783,11 @@ export async function runAudit(
           completed++;
 
           // === Update consecutive-failure tracker ===
+          //
+          // NOTE: psi-page-error is INTENTIONALLY excluded. It's per-page
+          // (Lighthouse choking on bot-protected/heavy pages) not API-wide,
+          // so a streak of them doesn't mean "PSI is down" — it just means
+          // some pages aren't auditable. Reporting per-row is enough.
           if (res.failed && (res.errorCode === 'rate-limit' || res.errorCode === 'api-error' || res.errorCode === 'timeout')) {
             consecutiveFailures++;
           } else if (!res.failed) {

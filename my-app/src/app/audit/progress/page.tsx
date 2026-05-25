@@ -42,6 +42,7 @@ const ERROR_CODE_LABELS: Record<AuditErrorCode, { short: string; description: st
   'permission-denied': { short: 'Key denied', description: 'API key invalid or PageSpeed Insights API not enabled on its project.' },
   'quota-exhausted': { short: 'Quota exhausted', description: 'Daily quota burned. Resets at midnight UTC.' },
   'preflight-failed': { short: 'Pre-flight failed', description: 'Audit refused to start because PageSpeed is unhealthy.' },
+  'psi-page-error': { short: 'Page not auditable', description: 'Lighthouse could not analyze this page (bot protection like Imperva/Cloudflare, heavy 3rd-party JS, or never reaches First Contentful Paint). Try testing it directly at pagespeed.web.dev to confirm — if it fails there too, the page is genuinely incompatible.' },
 };
 
 function ErrorCodeChip({ code }: { code?: string }) {
@@ -410,6 +411,9 @@ export default function AuditProgressPage() {
             quota exhausted, etc.) so users don't see a wall of generic "Failed". */}
         {dominantFailure && (() => {
           const info = ERROR_CODE_LABELS[dominantFailure.code as AuditErrorCode];
+          // Hard = nothing the audit can do; needs user/config action.
+          // psi-page-error is NOT hard — it's a per-page problem, banner
+          // uses amber (warning) so user knows it's not their key/quota.
           const isHard =
             dominantFailure.code === 'referer-blocked' ||
             dominantFailure.code === 'quota-exhausted' ||
