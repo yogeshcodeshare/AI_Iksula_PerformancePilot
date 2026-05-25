@@ -1,9 +1,9 @@
 'use client';
 
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState, useRef, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
-import { runAudit, retryFailedItems, FullAuditResult, PageDeviceStatus, MAX_RETRY_ATTEMPTS, getPageConcurrency } from '@/services/audit';
+import { runAudit, retryFailedItems, FullAuditResult, PageDeviceStatus, MAX_RETRY_ATTEMPTS, getPageConcurrency, AuditErrorCode } from '@/services/audit';
 import { saveAuditStateAsync } from '@/services/storage';
 import { AuditFormData, AuditState, MetricResult, CategoryScore, DiagnosticItem, CWVAssessment } from '@/types';
 import {
@@ -28,7 +28,37 @@ interface PageProgress {
   cwvAssessment?: CWVAssessment;
 }
 
-function StatusCell({ status }: { status: PageDeviceStatus }) {
+/**
+ * Compact, user-friendly label for each error code. Single source of truth —
+ * also used by the banner (DiagnosticBanner) so wording stays consistent.
+ */
+const ERROR_CODE_LABELS: Record<AuditErrorCode, { short: string; description: string }> = {
+  'timeout': { short: 'Timeout', description: 'PageSpeed took longer than the timeout. Heavy sites can need 60-120s.' },
+  'rate-limit': { short: 'Rate limit', description: 'Google throttled this request. Cooling down before retry.' },
+  'api-error': { short: 'API error', description: 'PageSpeed returned a server error (often a soft-throttle in disguise).' },
+  'network': { short: 'Network', description: 'Could not reach the PageSpeed API.' },
+  'no-data': { short: 'No data', description: 'PageSpeed completed but returned no usable data for this URL.' },
+  'referer-blocked': { short: 'Key blocks site', description: 'Your API key has HTTP-referrer restrictions that block this site. Update them in Google Cloud Console.' },
+  'permission-denied': { short: 'Key denied', description: 'API key invalid or PageSpeed Insights API not enabled on its project.' },
+  'quota-exhausted': { short: 'Quota exhausted', description: 'Daily quota burned. Resets at midnight UTC.' },
+  'preflight-failed': { short: 'Pre-flight failed', description: 'Audit refused to start because PageSpeed is unhealthy.' },
+};
+
+function ErrorCodeChip({ code }: { code?: string }) {
+  if (!code) return null;
+  const label = ERROR_CODE_LABELS[code as AuditErrorCode]?.short ?? code;
+  return (
+    <span
+      className="inline-flex items-center text-[10px] font-mono uppercase tracking-wider mt-0.5 px-1.5 py-0.5 rounded"
+      style={{ background: 'var(--red-bg)', color: 'var(--red-text)' }}
+      title={ERROR_CODE_LABELS[code as AuditErrorCode]?.description}
+    >
+      {label}
+    </span>
+  );
+}
+
+function StatusCell({ status, errorCode }: { status: PageDeviceStatus; errorCode?: string }) {
   if (status === 'running') return (
     <span className="inline-flex items-center gap-1.5 text-xs font-medium" style={{ color: 'var(--blue-text)' }}>
       <svg className="animate-spin" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>
@@ -42,9 +72,12 @@ function StatusCell({ status }: { status: PageDeviceStatus }) {
     </span>
   );
   if (status === 'failed' || status === 'timeout') return (
-    <span className="inline-flex items-center gap-1.5 text-xs font-medium" style={{ color: 'var(--red-text)' }}>
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
-      {status === 'timeout' ? 'Timeout' : 'Failed'}
+    <span className="inline-flex flex-col items-center gap-0.5">
+      <span className="inline-flex items-center gap-1.5 text-xs font-medium" style={{ color: 'var(--red-text)' }}>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
+        {status === 'timeout' ? 'Timeout' : 'Failed'}
+      </span>
+      <ErrorCodeChip code={errorCode} />
     </span>
   );
   if (status === 'retrying') return (
@@ -203,7 +236,16 @@ export default function AuditProgressPage() {
       console.error('Audit process failed:', err);
       setIsSaving(false);
       setStatus('failed');
-      setError(err instanceof Error ? err.message : 'Unknown error occurred');
+      // Use the descriptive message from runAudit's preflight when present —
+      // it already explains the root cause (e.g. "API key blocks this site...").
+      const errorCode = (err as { errorCode?: string })?.errorCode;
+      const underlying = (err as { underlyingCode?: AuditErrorCode })?.underlyingCode;
+      const baseMsg = err instanceof Error ? err.message : 'Unknown error occurred';
+      const prefix =
+        errorCode === 'preflight-failed' && underlying
+          ? `[${ERROR_CODE_LABELS[underlying]?.short ?? underlying}] `
+          : '';
+      setError(`${prefix}${baseMsg}`);
     }
   };
 
@@ -304,6 +346,49 @@ export default function AuditProgressPage() {
     }
   };
 
+  /**
+   * Dominant-failure banner — declared BEFORE the `if (!formData)` early return
+   * to comply with React's Rules of Hooks (see CLAUDE.md: "All hooks must be
+   * declared before any early returns"). The compare page learned this the
+   * hard way; same rule applies here.
+   *
+   * Computes whether to show a top-of-page banner explaining a systemic failure,
+   * not just per-row failures. Surfaces:
+   *   - Hard config errors (referer-blocked, quota-exhausted, permission-denied,
+   *     preflight-failed) — IMMEDIATELY, even on one occurrence.
+   *   - Other error codes only when >=50% of completed device-tasks share that code.
+   *
+   * This is the difference between "everything is broken because your key is
+   * blocked from this domain" (one-line fix in Cloud Console) and "two pages
+   * timed out" (probably transient).
+   */
+  const dominantFailure = useMemo(() => {
+    const codes: string[] = [];
+    for (const p of pageProgress) {
+      if ((p.mobile === 'failed' || p.mobile === 'timeout') && p.mobileErrorCode) codes.push(p.mobileErrorCode);
+      if ((p.desktop === 'failed' || p.desktop === 'timeout') && p.desktopErrorCode) codes.push(p.desktopErrorCode);
+    }
+    if (codes.length === 0) return null;
+
+    // Hard config errors surface immediately
+    const hardCodes: AuditErrorCode[] = ['referer-blocked', 'quota-exhausted', 'permission-denied', 'preflight-failed'];
+    for (const hc of hardCodes) {
+      if (codes.includes(hc)) {
+        return { code: hc, count: codes.filter(c => c === hc).length, total: pageProgress.length * 2 };
+      }
+    }
+
+    // Other codes: only if >=50% of completed tasks share this code
+    const counts = new Map<string, number>();
+    for (const c of codes) counts.set(c, (counts.get(c) ?? 0) + 1);
+    const top = [...counts.entries()].sort((a, b) => b[1] - a[1])[0];
+    const totalTasksLocal = pageProgress.length * 2;
+    if (top && totalTasksLocal > 0 && top[1] / totalTasksLocal >= 0.5) {
+      return { code: top[0], count: top[1], total: totalTasksLocal };
+    }
+    return null;
+  }, [pageProgress]);
+
   if (!formData) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
@@ -320,6 +405,53 @@ export default function AuditProgressPage() {
   return (
     <div className="bg-background min-h-[calc(100vh-4rem)] pb-24">
       <main className="max-w-[1024px] mx-auto px-6 py-10">
+
+        {/* Dominant-failure banner — surfaces systemic problems (key blocked,
+            quota exhausted, etc.) so users don't see a wall of generic "Failed". */}
+        {dominantFailure && (() => {
+          const info = ERROR_CODE_LABELS[dominantFailure.code as AuditErrorCode];
+          const isHard =
+            dominantFailure.code === 'referer-blocked' ||
+            dominantFailure.code === 'quota-exhausted' ||
+            dominantFailure.code === 'permission-denied' ||
+            dominantFailure.code === 'preflight-failed';
+          return (
+            <div
+              className="mb-8 border rounded-2xl p-4 flex items-start gap-3"
+              role="alert"
+              style={{
+                background: isHard ? 'var(--red-bg)' : 'var(--amber-bg)',
+                borderColor: isHard ? 'var(--red-text)' : 'var(--amber-text)',
+              }}
+            >
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={isHard ? 'var(--red-text)' : 'var(--amber-text)'} strokeWidth={2} className="flex-shrink-0 mt-0.5">
+                <circle cx="12" cy="12" r="10" />
+                <line x1="12" y1="8" x2="12" y2="12" />
+                <line x1="12" y1="16" x2="12.01" y2="16" />
+              </svg>
+              <div className="flex-1 min-w-0">
+                <div className="text-sm font-semibold mb-0.5" style={{ color: isHard ? 'var(--red-text)' : 'var(--amber-text)' }}>
+                  {info?.short ?? dominantFailure.code}
+                  <span className="ml-2 text-[11px] font-mono opacity-70">
+                    {dominantFailure.count}/{dominantFailure.total} tasks affected
+                  </span>
+                </div>
+                <div className="text-[13px] text-foreground/90">{info?.description ?? 'PageSpeed is returning errors.'}</div>
+                {dominantFailure.code === 'referer-blocked' && (
+                  <a
+                    href="https://console.cloud.google.com/apis/credentials"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-block mt-2 text-[12px] font-medium underline"
+                    style={{ color: 'var(--red-text)' }}
+                  >
+                    Open Google Cloud Console → Credentials
+                  </a>
+                )}
+              </div>
+            </div>
+          );
+        })()}
 
         {/* Progress Hero — Centered */}
         <div className="text-center mb-10">
@@ -414,8 +546,8 @@ export default function AuditProgressPage() {
                   <td className="px-5 py-3.5 font-mono text-muted-foreground text-xs max-w-[200px] truncate">
                     {page.url.replace(/^https?:\/\//, '').split('/').slice(0, 2).join('/')}
                   </td>
-                  <td className="px-5 py-3.5 text-center"><StatusCell status={page.mobile} /></td>
-                  <td className="px-5 py-3.5 text-center"><StatusCell status={page.desktop} /></td>
+                  <td className="px-5 py-3.5 text-center"><StatusCell status={page.mobile} errorCode={page.mobileErrorCode} /></td>
+                  <td className="px-5 py-3.5 text-center"><StatusCell status={page.desktop} errorCode={page.desktopErrorCode} /></td>
                   <td className="px-5 py-3.5 text-center">
                     <RowStatusBadge mobile={page.mobile} desktop={page.desktop} mobileErrorCode={page.mobileErrorCode} desktopErrorCode={page.desktopErrorCode} />
                   </td>

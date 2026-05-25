@@ -216,11 +216,32 @@ const SEO_GROUPS: Record<string, DiagnosticGroup> = {
 
 export type PageDeviceStatus = 'pending' | 'running' | 'completed' | 'failed' | 'timeout' | 'retrying';
 
+/**
+ * Complete enumeration of error codes the audit pipeline can surface.
+ *
+ * Distinguishing these matters because each implies a different remediation:
+ *   - timeout/rate-limit/api-error/network/no-data → transient or load-related; retry helps
+ *   - referer-blocked → Google Cloud Console key restriction; ONLY a config change helps
+ *   - permission-denied → key invalid or API not enabled on the project
+ *   - quota-exhausted → daily quota burned; need to wait until UTC midnight or get higher quota
+ *   - preflight-failed → audit refused to even start because PSI itself is unhealthy
+ */
+export type AuditErrorCode =
+  | 'timeout'
+  | 'rate-limit'
+  | 'api-error'
+  | 'network'
+  | 'no-data'
+  | 'referer-blocked'
+  | 'permission-denied'
+  | 'quota-exhausted'
+  | 'preflight-failed';
+
 export interface PageProgressUpdate {
   pageLabel: string;
   device: Device;
   status: PageDeviceStatus;
-  errorCode?: 'timeout' | 'rate-limit' | 'api-error' | 'no-data' | 'network';
+  errorCode?: AuditErrorCode;
   errorMessage?: string;
 }
 
@@ -238,13 +259,30 @@ export type ProgressCallback = (progress: AuditProgress) => void;
  * Fetch PageSpeed Insights API data
  */
 // Timeout for PageSpeed API calls.
-// First attempt: 90s — enough for most pages including moderately heavy ones.
-// Retry attempts: 120s — gives heavy pages (Amazon PDPs, etc.) extra headroom.
-const PAGESPEED_TIMEOUT_MS = 90_000;
-const PAGESPEED_RETRY_TIMEOUT_MS = 120_000;
+// First attempt: 120s — heavy e-commerce sites (e.g. converse.com.au behind Imperva) take 80s+;
+//   90s was leaving zero headroom and many calls were aborted at the wire just as PSI was about
+//   to respond. Bumped 2026-05-25.
+// Retry attempts: 150s — even more headroom for sites that already timed out once.
+const PAGESPEED_TIMEOUT_MS = 120_000;
+const PAGESPEED_RETRY_TIMEOUT_MS = 150_000;
 
 // Minimum gap between API calls to avoid burst pressure (ms)
 const MIN_CALL_GAP_MS = 300;
+
+/**
+ * Maximum number of consecutive PSI failures (rate-limit OR api-error) before
+ * the audit gives up rather than walking every remaining page only to fail.
+ * Web research (GoogleChrome/lighthouse #16853) confirms PSI returns HTTP 500
+ * as an undocumented soft-throttle and recovery needs 60-180s. Walking 30 more
+ * pages at 120s each = 60 minutes of dead time. Better to fail fast.
+ */
+const CONSECUTIVE_FAILURE_LIMIT = 3;
+
+/** Default cooldown (ms) when 429 has no Retry-After header. Web research suggests 60-180s. */
+const DEFAULT_RATE_LIMIT_COOLDOWN_MS = 60_000;
+
+/** Cap on Retry-After honored from server (avoid 1-hour stalls) */
+const MAX_RETRY_AFTER_MS = 180_000;
 
 /**
  * Dynamic concurrency based on page count and API key availability.
@@ -277,25 +315,128 @@ async function throttledFetchPageSpeed(url: string, device: Device, timeoutMs: n
 }
 
 /**
- * Classify a fetch error into a typed error code for the UI
+ * Parse the HTTP `Retry-After` header value into milliseconds.
+ * Spec (RFC 7231): either a delta in seconds, or an HTTP-date.
+ * Returns null when absent or unparseable.
  */
-function classifyFetchError(error: unknown): { code: 'timeout' | 'rate-limit' | 'api-error' | 'network'; message: string } {
-  const msg = error instanceof Error ? error.message : String(error);
+function parseRetryAfter(header: string | null): number | null {
+  if (!header) return null;
+  const seconds = Number(header);
+  if (Number.isFinite(seconds) && seconds >= 0) {
+    return Math.min(seconds * 1000, MAX_RETRY_AFTER_MS);
+  }
+  const date = Date.parse(header);
+  if (!Number.isNaN(date)) {
+    const delta = date - Date.now();
+    if (delta > 0) return Math.min(delta, MAX_RETRY_AFTER_MS);
+  }
+  return null;
+}
+
+/**
+ * Inspect an API error response and decide the precise error code.
+ * Critical distinctions (per Google docs + community findings — see AUDIT_FAILURE_ANALYSIS.md):
+ *   - 403 + "API_KEY_HTTP_REFERRER_BLOCKED" → referer-blocked (Cloud Console key restriction)
+ *   - 403 (other) → permission-denied (key invalid / API not enabled / missing scope)
+ *   - 429 + "quota" in message → quota-exhausted (daily limit; needs UTC midnight reset)
+ *   - 429 (other) → rate-limit (per-minute burst; cooldown helps)
+ *   - 5xx → api-error (often soft-throttle per GoogleChrome/lighthouse#16853; long cooldown helps)
+ */
+function classifyHttpError(status: number, errorBody: { error?: { message?: string; status?: string; details?: unknown[] } }): {
+  code: AuditErrorCode;
+  message: string;
+} {
+  const msg = errorBody?.error?.message || '';
+  const lower = msg.toLowerCase();
+
+  if (status === 403) {
+    if (lower.includes('referer') || lower.includes('referrer') || lower.includes('http_referrer')) {
+      return {
+        code: 'referer-blocked',
+        message:
+          'API key blocks this site. Go to Google Cloud Console → Credentials → your API key → ' +
+          'Application restrictions → add this domain (and localhost) or set to "None" for testing.',
+      };
+    }
+    return {
+      code: 'permission-denied',
+      message:
+        msg ||
+        'Permission denied (HTTP 403). Verify the API key has the PageSpeed Insights API enabled ' +
+        'and that key restrictions allow this origin.',
+    };
+  }
+
+  if (status === 429) {
+    if (lower.includes('quota') || lower.includes('daily')) {
+      return {
+        code: 'quota-exhausted',
+        message:
+          'Daily PageSpeed Insights quota exhausted on this API key. Resets at midnight UTC, ' +
+          'or request a higher quota in Google Cloud Console.',
+      };
+    }
+    return {
+      code: 'rate-limit',
+      message: msg || 'PageSpeed API rate-limited this request. Cooling down before retry.',
+    };
+  }
+
+  // 5xx — per web research, PSI returns 500 "Lighthouse returned error" both for genuine
+  // page failures AND as an undocumented soft-throttle. Treat as api-error; the audit
+  // orchestrator will apply a long cooldown when these accumulate.
+  return {
+    code: 'api-error',
+    message: `PageSpeed API error ${status}: ${msg || 'Lighthouse returned error'}`,
+  };
+}
+
+/**
+ * Classify a thrown fetch-layer error (no HTTP response received).
+ * AbortError = our own timeout. Other errors are network-level.
+ */
+function classifyFetchError(error: unknown): { code: AuditErrorCode; message: string } {
   if (error instanceof Error && error.name === 'AbortError') {
-    return { code: 'timeout', message: 'PageSpeed API did not respond in time (timeout). Retries use a longer timeout.' };
+    return {
+      code: 'timeout',
+      message:
+        `PageSpeed API did not respond within the timeout window. Heavy sites can take 60-90s; ` +
+        `retries use a longer timeout.`,
+    };
   }
-  if (msg.includes('429') || msg.toLowerCase().includes('quota') || msg.toLowerCase().includes('rate')) {
-    return { code: 'rate-limit', message: 'API rate limit or quota exceeded. Try again in a moment or add an API key.' };
-  }
+  const msg = error instanceof Error ? error.message : String(error);
   if (msg.includes('Failed to fetch') || msg.includes('NetworkError') || msg.includes('ENOTFOUND')) {
     return { code: 'network', message: 'Network error: could not reach the PageSpeed API.' };
   }
   return { code: 'api-error', message: msg };
 }
 
+/**
+ * In-memory PSI response cache, keyed by url+strategy+hourBucket.
+ * PSI results don't change minute-to-minute — caching for the audit lifetime is safe
+ * and saves real quota when users re-run audits of the same URLs.
+ * NOTE: deliberately in-memory only — IndexedDB cache would interact with the existing
+ * saveAuditStateAsync flow in ways that need separate thought.
+ */
+const psiCache = new Map<string, { hour: number; data: PageSpeedResponse }>();
+function getCacheKey(url: string, strategy: 'mobile' | 'desktop'): string {
+  return `${strategy}::${url}`;
+}
+function hourBucket(): number {
+  return Math.floor(Date.now() / 3_600_000);
+}
+
 async function fetchPageSpeed(url: string, device: Device, timeoutMs: number = PAGESPEED_TIMEOUT_MS): Promise<PageSpeedResponse> {
   const apiKey = process.env.NEXT_PUBLIC_PAGESPEED_API_KEY;
   const strategy = device === 'mobile' ? 'mobile' : 'desktop';
+
+  // Cache lookup
+  const cacheKey = getCacheKey(url, strategy);
+  const cached = psiCache.get(cacheKey);
+  if (cached && cached.hour === hourBucket()) {
+    console.log(`[PageSpeed API] CACHE HIT (in-memory) for ${url} (${device})`);
+    return cached.data;
+  }
 
   // Build API URL - include all categories to get full diagnostic data
   let apiUrl = `https://www.googleapis.com/pagespeedonline/v5/runPagespeed?url=${encodeURIComponent(url)}&strategy=${strategy}&category=PERFORMANCE&category=ACCESSIBILITY&category=BEST_PRACTICES&category=SEO`;
@@ -321,12 +462,20 @@ async function fetchPageSpeed(url: string, device: Device, timeoutMs: number = P
   }
 
   if (!response.ok) {
+    const retryAfterMs = parseRetryAfter(response.headers.get('retry-after'));
     const errorData = await response.json().catch(() => ({}));
-    const apiMsg = `PageSpeed API error ${response.status}: ${errorData.error?.message || response.statusText}`;
-    throw Object.assign(new Error(apiMsg), { errorCode: response.status === 429 ? 'rate-limit' : 'api-error' });
+    const { code, message } = classifyHttpError(response.status, errorData);
+    console.warn(
+      `[PageSpeed API] HTTP ${response.status} → ${code}${retryAfterMs ? ` (retry-after ${retryAfterMs}ms)` : ''}: ${message}`
+    );
+    throw Object.assign(new Error(message), {
+      errorCode: code,
+      httpStatus: response.status,
+      retryAfterMs,
+    });
   }
 
-  const data = await response.json();
+  const data: PageSpeedResponse = await response.json();
   console.log(`[PageSpeed API] Response received for ${url} (${device})`);
 
   const hasCrux = !!data.loadingExperience?.metrics;
@@ -334,7 +483,42 @@ async function fetchPageSpeed(url: string, device: Device, timeoutMs: number = P
   const hasLighthouse = !!data.lighthouseResult?.audits;
   console.log(`[PageSpeed API] Data sources - CrUX: ${hasCrux}, Origin CrUX: ${hasOriginCrux}, Lighthouse: ${hasLighthouse}`);
 
+  // Cache successful responses for the current hour bucket
+  psiCache.set(cacheKey, { hour: hourBucket(), data });
+
   return data;
+}
+
+/**
+ * Pre-flight PSI ping at audit start. Catches the obvious config errors
+ * (referer-blocked, quota-exhausted, permission-denied) before we burn 90s
+ * per page on calls that will all fail the same way.
+ *
+ * Uses google.com as the target — it's always cached on PSI's side and returns
+ * in <1s, so this adds negligible latency to a healthy audit and saves minutes
+ * on a broken one.
+ *
+ * Returns the error code if preflight failed, null if everything looks healthy.
+ */
+export async function preflightCheck(): Promise<{ code: AuditErrorCode; message: string } | null> {
+  try {
+    await fetchPageSpeed('https://www.google.com/', 'mobile', 10_000);
+    return null;
+  } catch (e) {
+    const code = (e as { errorCode?: AuditErrorCode }).errorCode;
+    const message = e instanceof Error ? e.message : 'Preflight check failed';
+    // Only hard-block on configuration errors. A timeout on google.com is unusual
+    // but not a reason to refuse the user's audit — could be flaky network.
+    if (code === 'referer-blocked' || code === 'permission-denied' || code === 'quota-exhausted') {
+      return { code, message };
+    }
+    // For other transient codes (timeout, network, rate-limit) we report it but
+    // let the audit attempt to proceed — the user may want to see partial results.
+    if (code === 'rate-limit') {
+      return { code, message: `Preflight detected rate-limit: ${message}` };
+    }
+    return null;
+  }
 }
 
 /**
@@ -1116,8 +1300,10 @@ export interface PageDeviceResult {
   diagnostics: DiagnosticItem[];
   cwvAssessment?: CWVAssessment;
   failed?: boolean;
-  errorCode?: 'timeout' | 'rate-limit' | 'api-error' | 'network' | 'no-data';
+  errorCode?: AuditErrorCode;
   errorMessage?: string;
+  /** Honor when present — server-supplied cooldown hint in ms */
+  retryAfterMs?: number;
 }
 
 async function auditPageDevice(
@@ -1230,18 +1416,20 @@ async function auditPageDevice(
       // Both PageSpeed and Lighthouse failed — return truly empty results.
       // NEVER return a fake zero-value metric. The UI must handle missing data explicitly.
       const originalErrorMsg = error instanceof Error ? error.message : 'Unknown PageSpeed error';
-      const errorCode = (error as { errorCode?: string }).errorCode || 'api-error';
+      const errorCode = (error as { errorCode?: AuditErrorCode }).errorCode || 'api-error';
+      const retryAfterMs = (error as { retryAfterMs?: number }).retryAfterMs;
       const capturedAt = new Date().toISOString();
 
-      console.warn(`[AuditPageDevice] All sources failed for ${url} (${device}). errorCode=${errorCode}`);
+      console.warn(`[AuditPageDevice] All sources failed for ${url} (${device}). errorCode=${errorCode}${retryAfterMs ? ` retryAfter=${retryAfterMs}ms` : ''}`);
 
       return {
         metrics: [], // No fake data — UI will show "unavailable"
         categoryScores: [],
         diagnostics: [],
         failed: true,
-        errorCode: errorCode as 'timeout' | 'rate-limit' | 'api-error' | 'network' | 'no-data',
+        errorCode,
         errorMessage: originalErrorMsg,
+        retryAfterMs,
         cwvAssessment: {
           pageId,
           device,
@@ -1462,10 +1650,34 @@ export async function runAudit(
   // Reset throttle timestamp for each new audit
   lastCallTimestamp = 0;
 
+  // === Preflight check ===
+  // Hits PSI with google.com (10s timeout). If the key is referer-blocked / has no
+  // PageSpeed Insights API enabled / quota is exhausted, abort BEFORE running any
+  // user URLs rather than waiting 120s on each call to fail the same way.
+  console.log('[Audit] Running preflight check against PageSpeed API...');
+  const preflight = await preflightCheck();
+  if (preflight && (preflight.code === 'referer-blocked' || preflight.code === 'permission-denied' || preflight.code === 'quota-exhausted')) {
+    console.error(`[Audit] Preflight FAILED (${preflight.code}): ${preflight.message}`);
+    throw Object.assign(new Error(preflight.message), { errorCode: 'preflight-failed' as const, underlyingCode: preflight.code });
+  }
+  if (preflight) {
+    // Soft warning — note it but proceed
+    console.warn(`[Audit] Preflight warning (${preflight.code}): ${preflight.message}`);
+  }
+
   console.log(`[Audit] Starting audit: ${pages.length} pages, concurrency: ${pageConcurrency}`);
+
+  // === Consecutive-failure tracker ===
+  // Streaks of rate-limit / api-error suggest PSI itself is unhealthy (per
+  // GoogleChrome/lighthouse#16853 — 500s as soft-throttle, 60-180s recovery).
+  // After CONSECUTIVE_FAILURE_LIMIT in a row we stop walking pages.
+  let consecutiveFailures = 0;
+  let auditAborted = false;
+  let abortReason: { code: AuditErrorCode; message: string } | null = null;
 
   // Process pages in parallel batches
   for (let i = 0; i < pages.length; i += (rateLimited ? 1 : pageConcurrency)) {
+    if (auditAborted) break;
     const batchSize = rateLimited ? 1 : pageConcurrency;
     const batch = pages.slice(i, i + batchSize);
 
@@ -1485,6 +1697,8 @@ export async function runAudit(
         };
 
         for (const device of ['mobile', 'desktop'] as Device[]) {
+          if (auditAborted) break;
+
           onProgress?.({
             total, completed,
             currentPage: page.pageLabel, currentDevice: device,
@@ -1494,11 +1708,38 @@ export async function runAudit(
           const res = await auditPageDevice(page.url, device, page.pageId);
           completed++;
 
-          // Detect rate limiting → adaptive throttle-back
+          // === Update consecutive-failure tracker ===
+          if (res.failed && (res.errorCode === 'rate-limit' || res.errorCode === 'api-error' || res.errorCode === 'timeout')) {
+            consecutiveFailures++;
+          } else if (!res.failed) {
+            consecutiveFailures = 0;
+          }
+
+          // Hard errors short-circuit immediately
+          if (res.errorCode === 'referer-blocked' || res.errorCode === 'quota-exhausted' || res.errorCode === 'permission-denied') {
+            auditAborted = true;
+            abortReason = { code: res.errorCode, message: res.errorMessage || 'Configuration error' };
+            console.error(`[Audit] Hard error → aborting remainder: ${res.errorMessage}`);
+          }
+
+          // Consecutive transient failures → abort
+          if (!auditAborted && consecutiveFailures >= CONSECUTIVE_FAILURE_LIMIT) {
+            auditAborted = true;
+            abortReason = {
+              code: res.errorCode || 'api-error',
+              message: `PageSpeed API returned ${CONSECUTIVE_FAILURE_LIMIT} consecutive failures (${res.errorCode}). Aborting to avoid wasting time on remaining pages — likely a temporary Google-side throttle, try again in a few minutes.`,
+            };
+            console.error(`[Audit] ${CONSECUTIVE_FAILURE_LIMIT} consecutive failures → aborting remainder`);
+          }
+
+          // === Adaptive cooldown ===
+          // On rate-limit, honor Retry-After (with sane defaults).
+          // Drop concurrency to sequential for the rest of the audit.
           if (res.errorCode === 'rate-limit' && !rateLimited) {
             rateLimited = true;
-            console.log('[Audit] Rate limited — reducing to sequential mode for remaining pages');
-            await new Promise(r => setTimeout(r, 3000)); // 3s cooldown
+            const cooldown = res.retryAfterMs ?? DEFAULT_RATE_LIMIT_COOLDOWN_MS;
+            console.log(`[Audit] Rate limited → sequential mode, cooling down ${cooldown}ms (server hint: ${res.retryAfterMs ?? 'none'})`);
+            await new Promise(r => setTimeout(r, cooldown));
           }
 
           onProgress?.({
@@ -1540,7 +1781,30 @@ export async function runAudit(
     }
   }
 
-  console.log(`[Audit] Complete: ${allMetrics.length} metrics, ${pageFailures.length} failures`);
+  if (auditAborted && abortReason) {
+    // Capture into an explicitly-typed const — TS's control-flow narrowing
+    // gets confused when the variable is mutated inside async closures above,
+    // so the explicit annotation pins the type for the loop body below.
+    const reason: { code: AuditErrorCode; message: string } = abortReason;
+    // Mark every page+device combo that never ran as a failure so the UI can show "not attempted"
+    const seen = new Set(pageFailures.map(f => `${f.pageId}:${f.device}`).concat(allMetrics.map(m => `${m.pageId}:${m.device}`)));
+    for (const page of pages) {
+      for (const device of ['mobile', 'desktop'] as Device[]) {
+        const key = `${page.pageId}:${device}`;
+        if (!seen.has(key)) {
+          pageFailures.push({
+            pageId: page.pageId,
+            pageLabel: page.pageLabel,
+            device,
+            errorCode: reason.code,
+            errorMessage: `Audit aborted before this page: ${reason.message}`,
+          });
+        }
+      }
+    }
+  }
+
+  console.log(`[Audit] Complete: ${allMetrics.length} metrics, ${pageFailures.length} failures${auditAborted ? ' (aborted)' : ''}`);
 
   return {
     run,
