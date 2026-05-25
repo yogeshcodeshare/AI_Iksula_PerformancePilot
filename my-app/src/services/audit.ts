@@ -300,11 +300,23 @@ const DEFAULT_RATE_LIMIT_COOLDOWN_MS = 60_000;
 const MAX_RETRY_AFTER_MS = 180_000;
 
 /**
- * When PSI returns "Lighthouse returned error" (psi-page-error) we do one
- * in-line retry with this cooldown. Web research and our 2026-05-25 live
- * test both confirm ~30 s is the sweet spot.
+ * Progressive backoff for `psi-page-error` retries.
+ *
+ * Pattern: wait 30 s → retry → wait 60 s → retry → wait 180 s (3 min) → retry.
+ * After 3 attempts (4 total calls including the original), give up and
+ * mark the page-device as "Page not auditable".
+ *
+ * Why progressive: PSI's Lighthouse failures on bot-protected pages are
+ * partly random (Imperva challenge timing, TLS fingerprint luck). Multiple
+ * spaced attempts substantially raise the success rate vs. one attempt.
+ * The final 180 s window (per user feedback 2026-05-25) gives PSI enough
+ * time to clear any soft-throttle / Imperva session state before the last
+ * attempt. Worst case: 270 s added per failing page-device — still bounded
+ * and unlocks data that would otherwise be missing from the report.
+ *
+ * Updated 2026-05-25: bumped 3rd attempt from 90 s → 180 s per user request.
  */
-const PSI_PAGE_ERROR_RETRY_DELAY_MS = 30_000;
+const PSI_PAGE_ERROR_RETRY_DELAYS_MS: number[] = [30_000, 60_000, 180_000];
 
 /**
  * Dynamic concurrency based on page count and API key availability.
@@ -1371,22 +1383,47 @@ async function auditPageDevice(
     // Try PageSpeed first (throttled to avoid API burst pressure).
     //
     // For the specific 'psi-page-error' code (HTTP 500 "Lighthouse returned
-    // error" / "Something went wrong" / NO_FCP) we attempt ONE in-line retry
-    // with a 30 s cooldown — direct test 2026-05-25 confirmed this is the
-    // sweet spot for pages whose Lighthouse run sometimes hits an Imperva
-    // challenge or runs out of paint window. We do NOT retry for any other
-    // error code here; those are handled by the outer audit orchestrator.
+    // error" / "Something went wrong" / NO_FCP) we attempt UP TO 3 in-line
+    // retries with progressive 30 s / 60 s / 90 s cooldowns (see the
+    // PSI_PAGE_ERROR_RETRY_DELAYS_MS comment for rationale). Other error
+    // codes propagate to the outer audit orchestrator unchanged.
     let psResult: PageSpeedResponse;
     try {
       psResult = await throttledFetchPageSpeed(url, device, timeoutMs);
     } catch (firstErr) {
       const code = (firstErr as { errorCode?: AuditErrorCode }).errorCode;
-      if (code === 'psi-page-error') {
-        console.warn(`[AuditPageDevice] psi-page-error for ${url} (${device}); waiting ${PSI_PAGE_ERROR_RETRY_DELAY_MS}ms and retrying once`);
-        await new Promise(r => setTimeout(r, PSI_PAGE_ERROR_RETRY_DELAY_MS));
-        psResult = await throttledFetchPageSpeed(url, device, timeoutMs);
-      } else {
+      if (code !== 'psi-page-error') {
         throw firstErr;
+      }
+      // Progressive in-line retry loop for psi-page-error only.
+      let lastErr: unknown = firstErr;
+      let recovered: PageSpeedResponse | null = null;
+      for (let attempt = 0; attempt < PSI_PAGE_ERROR_RETRY_DELAYS_MS.length; attempt++) {
+        const delay = PSI_PAGE_ERROR_RETRY_DELAYS_MS[attempt];
+        console.warn(
+          `[AuditPageDevice] psi-page-error for ${url} (${device}); ` +
+          `waiting ${delay}ms then retry ${attempt + 1}/${PSI_PAGE_ERROR_RETRY_DELAYS_MS.length}`
+        );
+        await new Promise(r => setTimeout(r, delay));
+        try {
+          recovered = await throttledFetchPageSpeed(url, device, timeoutMs);
+          console.log(`[AuditPageDevice] psi-page-error recovered after ${attempt + 1} retry(s) for ${url} (${device})`);
+          break;
+        } catch (retryErr) {
+          lastErr = retryErr;
+          const retryCode = (retryErr as { errorCode?: AuditErrorCode }).errorCode;
+          // If a retry surfaces a NEW error class (timeout, rate-limit, etc.),
+          // stop retrying psi-page-error and let the outer handler deal with it.
+          if (retryCode !== 'psi-page-error') {
+            throw retryErr;
+          }
+          // Otherwise continue the loop — next backoff window.
+        }
+      }
+      if (recovered) {
+        psResult = recovered;
+      } else {
+        throw lastErr;
       }
     }
 
