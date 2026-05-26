@@ -131,6 +131,81 @@ Steps already executed in this session:
 
 ---
 
+## 6.5 — Orchestration bug: "Completed with Queued rows" (2026-05-26)
+
+### Symptom
+Production audit of converse.com.au, 4 pages, concurrency 2:
+
+```
+Page         | Mobile  | Desktop | Status
+Homepage     | Done    | Timeout | Failed
+all sale     | Timeout | Timeout | Failed
+all sneaker  | Queued  | Queued  | Pending  ← never attempted
+search       | Queued  | Queued  | Pending  ← never attempted
+
+Footer: "Completed with 7 issues"
+Top banner: "7 items could not be retrieved"
+```
+
+The audit declared itself `Completed` while 4 page-device tasks were
+visibly still in the `Queued` state.
+
+### Root cause (which of H1–H5)
+
+**H4 + my own over-aggressive consecutive-failure abort** introduced in
+commit `37a1a6e`. Trace:
+
+| # | Event | State after |
+|---|---|---|
+| 1 | Homepage mobile → Done | `consecutiveFailures = 0` |
+| 2 | Homepage desktop → Timeout | `consecutiveFailures = 1` |
+| 3 | all-sale mobile → Timeout | `consecutiveFailures = 2` |
+| 4 | all-sale desktop → Timeout | `consecutiveFailures = 3` → **`auditAborted = true`** at `audit.ts:1842` |
+| 5 | Outer batch loop hits `if (auditAborted) break;` at `audit.ts:1791` — all-sneaker and search are never even queued for fetch |
+| 6 | Post-loop block at `audit.ts:1900-1921` pushes the 4 untouched page-device combos into `pageFailures` **but does not call `onProgress` for them** |
+| 7 | `runAudit` resolves; `progress/page.tsx` flips status to `completed`. UI's `pageProgress` state still has rows 3 & 4 at `status: 'pending'` → renders "Queued" |
+
+So both halves of the bug had the same root cause:
+
+- The transient-failure abort kicked in too easily on heavy sites where
+  3 consecutive timeouts are normal, not a sign of API failure.
+- The aborted-pages cleanup block updated the data model but never told
+  the UI, so rows stayed visually Queued.
+
+**H1, H2, H3, H5 ruled out:**
+- H1: no concurrency limiter used — control flow is a for-loop of batches, no slot to leak.
+- H2: `Promise.all` was used but `auditPageDevice` always returns (never throws), so no rejection short-circuit was happening today (still worth switching defensively).
+- H3: each `fetchPageSpeed` creates its own `AbortController` — no shared controller.
+- H5: `rateLimited` flag + cooldown both correct in isolation; the abort fired BEFORE throttle-back ever kicked in for transient cases.
+
+### Fix applied (single commit, `audit.ts` only)
+
+1. **Removed transient-failure abort.** The `consecutiveFailures >= CONSECUTIVE_FAILURE_LIMIT` block no longer flips `auditAborted`. The counter is kept and emits a single `console.warn` when it hits 3, for telemetry only. Adaptive throttle-back (`rateLimited = true` → sequential mode + Retry-After cooldown) already handles "Google is slow".
+2. **Kept hard-error abort.** Only `referer-blocked`, `quota-exhausted`, and `permission-denied` still abort the audit — those are config issues the user must fix; walking another 30 pages to fail the same way wastes their time.
+3. **Emit `onProgress` for never-attempted pages** during the hard-abort cleanup block. Drives the UI row out of `'pending'` into `'failed'` with a clear "Audit aborted before this page" message.
+4. **`Promise.all` → `Promise.allSettled`** with explicit rejection logging. Defensive: today `auditPageDevice` never throws, but a future regression cannot cancel the whole batch — only that one row.
+
+### Acceptance verification
+
+Acceptance criteria from the brief:
+
+| Criterion | Verified by |
+|---|---|
+| 4-page audit at concurrency=2 with 2 simultaneous timeouts: pages 3 & 4 MUST be attempted | New code: no transient-abort path remains. The outer batch loop only short-circuits on hard config codes. |
+| "Completed" status only fires when every page+device pair is terminal | Each row's `onProgress` is now called either during the run or during the hard-abort cleanup; no terminal state is left in `'pending'`. |
+| No regression to successful audits | Build ✓ / lint clean / preflight + per-row retry / cache logic untouched. |
+
+### Files changed (this fix)
+
+| File | Change |
+|---|---|
+| `my-app/src/services/audit.ts` | Removed transient-abort path; added `onProgress` emission inside aborted-pages cleanup; `Promise.all` → `Promise.allSettled` with rejected-branch handling; added explanatory comments. |
+
+No UI or persistence code changes. Commit: see git log for the
+`fix(audit): never abort on transient failures` entry on `main`.
+
+---
+
 ## 7. FILES TOUCHED
 
 - `my-app/src/services/audit.ts` — net +~190 lines: preflight, retry-after, in-memory cache, consecutive-failure abort, error classifier overhaul, timeout bump.

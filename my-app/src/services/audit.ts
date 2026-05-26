@@ -1778,10 +1778,24 @@ export async function runAudit(
 
   console.log(`[Audit] Starting audit: ${pages.length} pages, concurrency: ${pageConcurrency}`);
 
-  // === Consecutive-failure tracker ===
-  // Streaks of rate-limit / api-error suggest PSI itself is unhealthy (per
-  // GoogleChrome/lighthouse#16853 — 500s as soft-throttle, 60-180s recovery).
-  // After CONSECUTIVE_FAILURE_LIMIT in a row we stop walking pages.
+  // === Consecutive-failure tracker (observability only) ===
+  //
+  // BUG FIX 2026-05-26: We used to abort the entire audit on
+  // CONSECUTIVE_FAILURE_LIMIT transient failures (timeout/rate-limit/
+  // api-error). That was wrong for the real-world case of a 4-page audit
+  // against converse.com.au where the first 3 page-device combos timed
+  // out — the abort kicked in and pages 3 & 4 (which might well have
+  // succeeded) were never attempted, while the UI showed them stuck as
+  // "Queued" forever.
+  //
+  // New policy:
+  //   - We STILL count consecutive transient failures, only for telemetry.
+  //   - We DO NOT abort the audit on them — adaptive throttle-back
+  //     (rateLimited = true → sequential mode + Retry-After cooldown)
+  //     already provides the right response for "Google is slow".
+  //   - We ONLY abort on HARD config errors (referer-blocked,
+  //     quota-exhausted, permission-denied). Those genuinely can't
+  //     recover within the same audit run.
   let consecutiveFailures = 0;
   let auditAborted = false;
   let abortReason: { code: AuditErrorCode; message: string } | null = null;
@@ -1794,10 +1808,14 @@ export async function runAudit(
 
     console.log(`[Audit] Batch ${Math.floor(i / batchSize) + 1}: processing ${batch.length} page(s) in parallel`);
 
-    // Process pages in this batch concurrently via Promise.all
+    // Process pages in this batch concurrently via Promise.allSettled.
     // Each page runs mobile → desktop SEQUENTIALLY (same-URL parallel causes Google queueing)
-    // Different pages run in PARALLEL (safe with API key)
-    const batchResults = await Promise.all(
+    // Different pages run in PARALLEL (safe with API key).
+    //
+    // Defensive: auditPageDevice always returns (never throws) today, but
+    // Promise.allSettled means a future regression that DOES let an error
+    // escape can no longer cancel the entire batch — only that one slot.
+    const batchSettled = await Promise.allSettled(
       batch.map(async (page) => {
         const pageResult = {
           metrics: [] as MetricResult[],
@@ -1819,33 +1837,37 @@ export async function runAudit(
           const res = await auditPageDevice(page.url, device, page.pageId);
           completed++;
 
-          // === Update consecutive-failure tracker ===
+          // === Update consecutive-failure counter (telemetry only) ===
           //
-          // NOTE: psi-page-error is INTENTIONALLY excluded. It's per-page
-          // (Lighthouse choking on bot-protected/heavy pages) not API-wide,
-          // so a streak of them doesn't mean "PSI is down" — it just means
-          // some pages aren't auditable. Reporting per-row is enough.
+          // NOTE: psi-page-error is INTENTIONALLY excluded — per-page issue,
+          // not API-wide. We never abort on transient streaks (see fix
+          // comment at the runAudit top). This counter is kept only so we
+          // can warn in the console if PSI is being persistently flaky.
           if (res.failed && (res.errorCode === 'rate-limit' || res.errorCode === 'api-error' || res.errorCode === 'timeout')) {
             consecutiveFailures++;
+            if (consecutiveFailures === CONSECUTIVE_FAILURE_LIMIT) {
+              console.warn(
+                `[Audit] ${CONSECUTIVE_FAILURE_LIMIT} consecutive transient failures — ` +
+                `Google-side throttle suspected. Continuing in sequential mode; ` +
+                `remaining pages will still be attempted.`
+              );
+            }
           } else if (!res.failed) {
             consecutiveFailures = 0;
           }
 
-          // Hard errors short-circuit immediately
+          // === Hard errors short-circuit immediately ===
+          //
+          // These three are the ONLY codes that abort the rest of the audit:
+          //  - referer-blocked  → API key restriction in Google Cloud Console
+          //  - quota-exhausted  → daily quota gone
+          //  - permission-denied → key invalid / API not enabled
+          // Each is a config issue the user MUST fix; walking another 30
+          // pages at 120 s each to fail the same way wastes their time.
           if (res.errorCode === 'referer-blocked' || res.errorCode === 'quota-exhausted' || res.errorCode === 'permission-denied') {
             auditAborted = true;
             abortReason = { code: res.errorCode, message: res.errorMessage || 'Configuration error' };
             console.error(`[Audit] Hard error → aborting remainder: ${res.errorMessage}`);
-          }
-
-          // Consecutive transient failures → abort
-          if (!auditAborted && consecutiveFailures >= CONSECUTIVE_FAILURE_LIMIT) {
-            auditAborted = true;
-            abortReason = {
-              code: res.errorCode || 'api-error',
-              message: `PageSpeed API returned ${CONSECUTIVE_FAILURE_LIMIT} consecutive failures (${res.errorCode}). Aborting to avoid wasting time on remaining pages — likely a temporary Google-side throttle, try again in a few minutes.`,
-            };
-            console.error(`[Audit] ${CONSECUTIVE_FAILURE_LIMIT} consecutive failures → aborting remainder`);
           }
 
           // === Adaptive cooldown ===
@@ -1887,8 +1909,14 @@ export async function runAudit(
       })
     );
 
-    // Merge batch results into master arrays
-    for (const result of batchResults) {
+    // Merge batch results into master arrays. With allSettled, surface any
+    // unexpected rejection in the log but keep the audit moving.
+    for (const settled of batchSettled) {
+      if (settled.status === 'rejected') {
+        console.error('[Audit] Unexpected per-page rejection — investigate auditPageDevice:', settled.reason);
+        continue;
+      }
+      const result = settled.value;
       allMetrics.push(...result.metrics);
       allCategoryScores.push(...result.categoryScores);
       allDiagnostics.push(...result.diagnostics);
@@ -1902,8 +1930,17 @@ export async function runAudit(
     // gets confused when the variable is mutated inside async closures above,
     // so the explicit annotation pins the type for the loop body below.
     const reason: { code: AuditErrorCode; message: string } = abortReason;
-    // Mark every page+device combo that never ran as a failure so the UI can show "not attempted"
+    // Mark every page+device combo that never ran as a failure so the UI can show "not attempted".
+    //
+    // BUG FIX 2026-05-26: We must ALSO emit onProgress for these rows.
+    // Previously we only updated the data structure (pageFailures), which
+    // meant the UI's pageProgress state kept the row in 'pending' (i.e.
+    // "Queued") forever, even after the audit's status flipped to
+    // "Completed". The user saw "Completed with 7 issues" while two rows
+    // visibly stayed Queued. Emitting onProgress drives the StatusCell
+    // back to a terminal "Failed" state.
     const seen = new Set(pageFailures.map(f => `${f.pageId}:${f.device}`).concat(allMetrics.map(m => `${m.pageId}:${m.device}`)));
+    const abortMessage = `Audit aborted before this page: ${reason.message}`;
     for (const page of pages) {
       for (const device of ['mobile', 'desktop'] as Device[]) {
         const key = `${page.pageId}:${device}`;
@@ -1913,7 +1950,22 @@ export async function runAudit(
             pageLabel: page.pageLabel,
             device,
             errorCode: reason.code,
-            errorMessage: `Audit aborted before this page: ${reason.message}`,
+            errorMessage: abortMessage,
+          });
+          // Drive the UI row out of 'pending' into 'failed'
+          completed++;
+          onProgress?.({
+            total,
+            completed,
+            currentPage: page.pageLabel,
+            currentDevice: device,
+            pageUpdate: {
+              pageLabel: page.pageLabel,
+              device,
+              status: 'failed',
+              errorCode: reason.code,
+              errorMessage: abortMessage,
+            },
           });
         }
       }
