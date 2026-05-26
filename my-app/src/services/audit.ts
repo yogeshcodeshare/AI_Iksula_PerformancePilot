@@ -302,21 +302,21 @@ const MAX_RETRY_AFTER_MS = 180_000;
 /**
  * Progressive backoff for `psi-page-error` retries.
  *
- * Pattern: wait 30 s → retry → wait 60 s → retry → wait 180 s (3 min) → retry.
+ * Pattern: wait 30 s → retry → wait 60 s → retry → wait 120 s (2 min) → retry.
  * After 3 attempts (4 total calls including the original), give up and
  * mark the page-device as "Page not auditable".
  *
  * Why progressive: PSI's Lighthouse failures on bot-protected pages are
  * partly random (Imperva challenge timing, TLS fingerprint luck). Multiple
  * spaced attempts substantially raise the success rate vs. one attempt.
- * The final 180 s window (per user feedback 2026-05-25) gives PSI enough
- * time to clear any soft-throttle / Imperva session state before the last
- * attempt. Worst case: 270 s added per failing page-device — still bounded
- * and unlocks data that would otherwise be missing from the report.
+ * The 120 s final window (revised down from 180 s on 2026-05-25 user
+ * feedback) still gives PSI enough time to clear short-lived soft-throttle
+ * / Imperva session state without dragging the audit too long. Worst case:
+ * 210 s added per failing page-device.
  *
- * Updated 2026-05-25: bumped 3rd attempt from 90 s → 180 s per user request.
+ * Updated 2026-05-25: 3rd attempt 90 s → 180 s → 120 s (current).
  */
-const PSI_PAGE_ERROR_RETRY_DELAYS_MS: number[] = [30_000, 60_000, 180_000];
+const PSI_PAGE_ERROR_RETRY_DELAYS_MS: number[] = [30_000, 60_000, 120_000];
 
 /**
  * Dynamic concurrency based on page count and API key availability.
