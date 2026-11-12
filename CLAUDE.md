@@ -10,9 +10,12 @@ All commands run from `my-app/`:
 npm run dev        # Dev server → http://localhost:3000
 npm run build      # Static export → dist/
 npm run lint       # ESLint
+npm test               # Vitest unit/component tests (src/**/*.test.ts, test/**)
+npm run test:coverage  # with v8 coverage for src/services + src/lib
+npm run test:e2e       # Playwright (e2e/); set E2E_BASE_URL to test a deployed URL
 ```
 
-No test suite exists. Manual testing is the only validation path (see AGENTS.md → Testing Instructions).
+Known bugs are captured as `it.fails` tests (e.g. comparison.test.ts "BUG B.2"); flip them to `it` when fixed.
 
 To add a shadcn/ui component:
 ```bash
@@ -225,7 +228,7 @@ Canonical thresholds are defined in `src/lib/constants.ts` (`THRESHOLDS` object)
 
 ### Testing
 
-No test suite exists. Manual validation only:
+Automated: Vitest (unit, jsdom + fake-indexeddb) and Playwright (e2e). Fixtures in `my-app/test/fixtures/`. Manual validation:
 1. `npm run dev` from `my-app/`
 2. Create audit with test URLs (e.g., `https://www.google.com`)
 3. Verify progress tracking shows mobile + desktop status
