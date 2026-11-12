@@ -12,6 +12,8 @@ import {
   ArrowRight,
 } from 'lucide-react';
 import Link from 'next/link';
+import { buildFailureIssueUrl } from '@/lib/issueReport';
+import { APP_VERSION } from '@/lib/constants';
 
 interface PageProgress {
   pageLabel: string;
@@ -42,6 +44,7 @@ const ERROR_CODE_LABELS: Record<AuditErrorCode, { short: string; description: st
   'permission-denied': { short: 'Key denied', description: 'API key invalid or PageSpeed Insights API not enabled on its project.' },
   'quota-exhausted': { short: 'Quota exhausted', description: 'Daily quota burned. Resets at midnight UTC.' },
   'preflight-failed': { short: 'Pre-flight failed', description: 'Audit refused to start because PageSpeed is unhealthy.' },
+  'page-unreachable': { short: 'Site unreachable', description: 'Google could not load this URL as a web page (domain does not exist, connection refused, or the link is a file such as a PDF). Check the URL; retrying will not help.' },
   'psi-page-error': { short: 'Page not auditable', description: 'Lighthouse could not analyze this page (bot protection like Imperva/Cloudflare, heavy 3rd-party JS, or never reaches First Contentful Paint). Try testing it directly at pagespeed.web.dev to confirm — if it fails there too, the page is genuinely incompatible.' },
 };
 
@@ -618,6 +621,22 @@ export default function AuditProgressPage() {
                   <Button onClick={handleFullRetry} variant="outline" className="border-border text-muted-foreground h-10 px-4 rounded-[10px]">
                     <RotateCcw className="h-4 w-4 mr-2" /> Full Re-run
                   </Button>
+                )}
+                {failureCount > 0 && !isRetrying && lastSavedStateRef.current?.run && (
+                  <a
+                    href={buildFailureIssueUrl(
+                      lastSavedStateRef.current.run,
+                      lastSavedStateRef.current.pages,
+                      lastSavedStateRef.current.pageFailures ?? [],
+                      APP_VERSION,
+                    )}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    title="Opens a pre-filled GitHub issue with the failed URLs and error codes. Review it before submitting."
+                    className="px-4 py-2 text-sm font-medium border border-border rounded-[10px] text-muted-foreground hover:text-foreground transition-colors no-underline"
+                  >
+                    Report on GitHub
+                  </a>
                 )}
               </>
             )}

@@ -237,6 +237,14 @@ export type AuditErrorCode =
   | 'quota-exhausted'
   | 'preflight-failed'
   /**
+   * The audited URL itself could not be loaded by Google: HTTP 400
+   * "FAILED_DOCUMENT_REQUEST" / "DNS_FAILURE" with net::ERR_NAME_NOT_RESOLVED,
+   * ERR_CONNECTION_* etc. (found 2026-11 in the Day 4 scenario test with a
+   * non-existent domain, previously shown as a misleading "API error").
+   * A wrong / private URL: NOT retryable.
+   */
+  | 'page-unreachable'
+  /**
    * PSI's Lighthouse run failed on a specific page (HTTP 500
    * "Lighthouse returned error: Something went wrong" or "NO_FCP").
    *
@@ -251,6 +259,28 @@ export type AuditErrorCode =
    * cooldown, don't count toward audit-wide consecutive-failure abort.
    */
   | 'psi-page-error';
+
+/**
+ * Errors that can succeed when tried again later (Google-side load / flakiness).
+ * Config errors (referer-blocked, permission-denied, quota-exhausted) are NOT
+ * retryable within the same day/run: retrying them only wastes time and quota.
+ */
+export const RETRYABLE_ERROR_CODES: ReadonlySet<string> = new Set([
+  'timeout', 'rate-limit', 'api-error', 'network', 'no-data', 'psi-page-error',
+]);
+
+export function isRetryableError(code?: string): boolean {
+  return !!code && RETRYABLE_ERROR_CODES.has(code);
+}
+
+/**
+ * Cooldown before the automatic second pass. PSI's soft-throttle (HTTP 500 /
+ * 429) typically clears in 60-180 s; 30 s plus sequential, one-at-a-time
+ * calls is enough to recover most transient failures without a long stall.
+ */
+export const SECOND_PASS_COOLDOWN_MS = 30_000;
+
+const sleep = (ms: number) => new Promise<void>(r => setTimeout(r, ms));
 
 export interface PageProgressUpdate {
   pageLabel: string;
@@ -448,6 +478,21 @@ export function classifyHttpError(status: number, errorBody: { error?: { message
     };
   }
 
+  // 4xx where Lighthouse could not load the audited URL at all (bad domain,
+  // DNS, connection refused). The user's URL is the problem, not the API.
+  if (status >= 400 && status < 500 && (
+    lower.includes('failed_document_request') || lower.includes('dns_failure') ||
+    lower.includes('err_name_not_resolved') || lower.includes('err_connection')
+  )) {
+    return {
+      code: 'page-unreachable',
+      message:
+        'Google could not load this URL as a web page: the domain may not exist, the server ' +
+        'refused the connection, or the link is a file/download (e.g. a PDF) rather than an HTML page. ' +
+        'Check the URL is correct and publicly reachable.' + (msg ? ` Details: ${msg}` : ''),
+    };
+  }
+
   // Default — anything else (4xx not handled above, weird statuses)
   return {
     code: 'api-error',
@@ -491,13 +536,18 @@ function hourBucket(): number {
   return Math.floor(Date.now() / 3_600_000);
 }
 
-async function fetchPageSpeed(url: string, device: Device, timeoutMs: number = PAGESPEED_TIMEOUT_MS): Promise<PageSpeedResponse> {
+async function fetchPageSpeed(
+  url: string,
+  device: Device,
+  timeoutMs: number = PAGESPEED_TIMEOUT_MS,
+  useCache = true
+): Promise<PageSpeedResponse> {
   const apiKey = process.env.NEXT_PUBLIC_PAGESPEED_API_KEY;
   const strategy = device === 'mobile' ? 'mobile' : 'desktop';
 
   // Cache lookup
   const cacheKey = getCacheKey(url, strategy);
-  const cached = psiCache.get(cacheKey);
+  const cached = useCache ? psiCache.get(cacheKey) : undefined;
   if (cached && cached.hour === hourBucket()) {
     console.log(`[PageSpeed API] CACHE HIT (in-memory) for ${url} (${device})`);
     return cached.data;
@@ -572,7 +622,8 @@ export async function preflightCheck(): Promise<{ code: AuditErrorCode; message:
   // slower. Better a 20 s preflight that catches the obvious config errors
   // than a fast preflight that gives false negatives.
   try {
-    await fetchPageSpeed('https://www.google.com/', 'mobile', 20_000);
+    // Never served from cache: the point is to check the key/quota *now*.
+    await fetchPageSpeed('https://www.google.com/', 'mobile', 20_000, false);
     return null;
   } catch (e) {
     const code = (e as { errorCode?: AuditErrorCode }).errorCode;
@@ -1579,10 +1630,16 @@ export interface FullAuditResult {
 
 export const MAX_RETRY_ATTEMPTS = 3;
 
-/** Bounded backoff delays (ms) based on retry attempt number (1-indexed): 2s, 4s, 8s */
+/**
+ * Cooldown (ms) before a manual "Retry failed" attempt (1-indexed): 30 s, 60 s, 120 s.
+ *
+ * Changed 2026-11 (user feedback "URLs fail multiple times"): the previous
+ * 2 s / 4 s / 8 s backoff retried well inside PSI's soft-throttle window
+ * (60-180 s, see AUDIT_FAILURE_ANALYSIS.md), so a retry usually failed again.
+ */
 /** @internal exported for unit tests */
 export function retryDelay(attempt: number): number {
-  return Math.min(2000 * Math.pow(2, attempt - 1), 8000);
+  return Math.min(30_000 * Math.pow(2, attempt - 1), 120_000);
 }
 
 /**
@@ -1609,35 +1666,52 @@ export async function retryFailedItems(
   }
 
   const retryAttempt = (previousState.retryAttempt ?? 0) + 1;
-  console.log(`[retryFailedItems] Attempt ${retryAttempt}/${MAX_RETRY_ATTEMPTS}. Retrying ${failures.length} failed item(s).`);
 
-  // Bounded backoff before retrying
+  // Config errors (quota / key) cannot recover by retrying — keep them as-is.
+  const permanentFailures = failures.filter(f => !isRetryableError(f.errorCode));
+  const retryable = failures.filter(f => isRetryableError(f.errorCode));
+  console.log(`[retryFailedItems] Attempt ${retryAttempt}/${MAX_RETRY_ATTEMPTS}. Retrying ${retryable.length} item(s); skipping ${permanentFailures.length} non-retryable.`);
+
+  if (retryable.length === 0) {
+    return {
+      run: previousState.run!,
+      pages: previousState.pages,
+      metrics: previousState.metrics,
+      categoryScores: previousState.categoryScores,
+      diagnostics: previousState.diagnostics,
+      cwvAssessments: previousState.cwvAssessments,
+      pageFailures: permanentFailures
+    };
+  }
+
+  // Cooldown long enough for PSI's soft-throttle to clear
   const delay = retryDelay(retryAttempt);
   console.log(`[retryFailedItems] Waiting ${delay}ms before retry...`);
-  await new Promise<void>(resolve => setTimeout(resolve, delay));
+  await sleep(delay);
 
-  const total = failures.length;
+  const total = retryable.length;
   let completed = 0;
 
   // Notify progress start
   onProgress?.({ total, completed, pageUpdate: undefined });
 
-  // Group failures by pageId for parallel retry (different pages can retry concurrently)
   const failuresByPage = new Map<string, typeof failures>();
-  for (const failure of failures) {
+  for (const failure of retryable) {
     const existing = failuresByPage.get(failure.pageId) || [];
     existing.push(failure);
     failuresByPage.set(failure.pageId, existing);
   }
 
   const uniquePages = Array.from(failuresByPage.keys());
-  const retryConcurrency = getPageConcurrency(uniquePages.length);
+  // One page at a time: these URLs already failed under load; parallel retries
+  // recreate the same pressure on PSI that caused the failure.
+  const retryConcurrency = 1;
 
   let mergedMetrics = [...previousState.metrics];
   let mergedCategoryScores = [...previousState.categoryScores];
   let mergedDiagnostics = [...previousState.diagnostics];
   let mergedCwvAssessments = [...previousState.cwvAssessments];
-  const remainingFailures: FullAuditResult['pageFailures'] = [];
+  const remainingFailures: FullAuditResult['pageFailures'] = [...permanentFailures];
 
   console.log(`[retryFailedItems] Retrying ${failures.length} items across ${uniquePages.length} pages (concurrency: ${retryConcurrency})`);
 
@@ -1932,6 +2006,57 @@ export async function runAudit(
       allDiagnostics.push(...result.diagnostics);
       allCwvAssessments.push(...result.cwvAssessments);
       pageFailures.push(...result.failures);
+    }
+  }
+
+  // === Automatic second pass (2026-11, user feedback "URLs fail multiple times") ===
+  //
+  // Transient failures (timeout / rate-limit / api-error / network / no-data)
+  // are usually Google-side load while many calls are in flight. After the
+  // main batch finishes the load is gone, so we cool down once and retry those
+  // rows ONE AT A TIME with the longer retry timeout. psi-page-error is skipped:
+  // it already had 3 in-line retries (30/60/120 s) inside auditPageDevice.
+  const secondPassCandidates = auditAborted
+    ? []
+    : pageFailures.filter(f => isRetryableError(f.errorCode) && f.errorCode !== 'psi-page-error');
+
+  if (secondPassCandidates.length > 0) {
+    console.log(`[Audit] Second pass: ${secondPassCandidates.length} transient failure(s); cooling down ${SECOND_PASS_COOLDOWN_MS}ms`);
+    for (const f of secondPassCandidates) {
+      onProgress?.({ total, completed, currentPage: f.pageLabel, currentDevice: f.device,
+        pageUpdate: { pageLabel: f.pageLabel, device: f.device, status: 'retrying' } });
+    }
+    await sleep(SECOND_PASS_COOLDOWN_MS);
+
+    for (const f of secondPassCandidates) {
+      const page = pages.find(p => p.pageId === f.pageId);
+      if (!page) continue;
+      onProgress?.({ total, completed, currentPage: f.pageLabel, currentDevice: f.device,
+        pageUpdate: { pageLabel: f.pageLabel, device: f.device, status: 'running' } });
+
+      const res = await auditPageDevice(page.url, f.device, page.pageId, PAGESPEED_RETRY_TIMEOUT_MS);
+      const idx = pageFailures.indexOf(f);
+
+      if (!res.failed) {
+        if (idx !== -1) pageFailures.splice(idx, 1);
+        allMetrics.push(...res.metrics);
+        allCategoryScores.push(...res.categoryScores);
+        allDiagnostics.push(...res.diagnostics);
+        if (res.cwvAssessment) allCwvAssessments.push(res.cwvAssessment);
+        console.log(`[Audit] Second pass recovered ${page.url} (${f.device})`);
+      } else if (idx !== -1) {
+        pageFailures[idx] = { ...f, errorCode: res.errorCode || f.errorCode, errorMessage: res.errorMessage || f.errorMessage };
+      }
+
+      onProgress?.({ total, completed, currentPage: f.pageLabel, currentDevice: f.device,
+        pageUpdate: {
+          pageLabel: f.pageLabel, device: f.device,
+          status: res.failed ? (res.errorCode === 'timeout' ? 'timeout' : 'failed') : 'completed',
+          errorCode: res.errorCode, errorMessage: res.errorMessage,
+        } });
+
+      // Stop early on config errors surfaced during the second pass
+      if (res.errorCode === 'quota-exhausted' || res.errorCode === 'referer-blocked' || res.errorCode === 'permission-denied') break;
     }
   }
 
