@@ -35,6 +35,11 @@ describe('classifyHttpError', () => {
     expect(classifyHttpError(429, { error: { message: 'Too many requests' } }).code).toBe('rate-limit'));
   it.each(['Lighthouse returned error: Something went wrong', 'NO_FCP', 'NO_DOCUMENT_REQUEST'])(
     '500 "%s" => psi-page-error', msg => expect(classifyHttpError(500, { error: { message: msg } }).code).toBe('psi-page-error'));
+  it('400 FAILED_DOCUMENT_REQUEST / ERR_CONNECTION => page-unreachable (not retryable)', () => {
+    const r = classifyHttpError(400, { error: { message: 'Lighthouse returned error: FAILED_DOCUMENT_REQUEST. (Details: net::ERR_CONNECTION_FAILED)' } });
+    expect(r.code).toBe('page-unreachable');
+    expect(isRetryableError(r.code)).toBe(false);
+  });
   it('503 generic => api-error', () =>
     expect(classifyHttpError(503, { error: { message: 'backend unavailable' } }).code).toBe('api-error'));
   it('400 / empty body => api-error with status in message', () => {

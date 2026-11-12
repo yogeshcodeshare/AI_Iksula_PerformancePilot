@@ -8,6 +8,8 @@ import { runAudit } from './audit';
 import type { AuditFormData } from '@/types';
 import { psiResponse, jsonResponse, psiError, WEBDEV_FIELD } from '../../test/fixtures/psi';
 
+const REAL = 'Lighthouse returned error: FAILED_DOCUMENT_REQUEST. Lighthouse was unable to reliably load the page you requested. Make sure you are testing the correct URL and that the server is properly responding to all requests. (Details: net::ERR_CONNECTION_FAILED)';
+
 type Handler = (url: string, strategy: string) => Response | Promise<Response>;
 let calls: { url: string; strategy: string }[] = [];
 let uid = 0;
@@ -79,13 +81,13 @@ describe('runAudit', () => {
   it('one failing URL does not abort the batch; failure is recorded with its error code', async () => {
     const bad = u('bad'); const good = u('good');
     mockPsi(url => url === bad
-      ? jsonResponse(400, psiError(400, 'Lighthouse returned error: FAILED_DOCUMENT_REQUEST'))
+      ? jsonResponse(400, psiError(400, 'Lighthouse returned error: FAILED_DOCUMENT_REQUEST. Lighthouse was unable to reliably load the page you requested. Make sure you are testing the correct URL and that the server is properly responding to all requests. (Details: net::ERR_CONNECTION_FAILED)'))
       : jsonResponse(200, psiResponse({ url, field: WEBDEV_FIELD })));
     const r = await run([bad, good]);
     expect(r.metrics.some(m => r.pages.find(p => p.url === good)?.pageId === m.pageId)).toBe(true);
     const failed = r.pageFailures.filter(f => r.pages.find(p => p.pageId === f.pageId)?.url === bad);
     expect(failed.length).toBeGreaterThan(0);
-    expect(failed[0].errorCode).toBe('api-error');
+    expect(failed[0].errorCode).toBe('page-unreachable');
   });
 
   it('psi-page-error (HTTP 500 "Something went wrong") is retried and recovers', async () => {
@@ -126,6 +128,18 @@ describe('runAudit', () => {
     expect(r.pageFailures).toEqual([]);
     expect(busyCalls).toBe(2); // original + one automatic second-pass call
     expect(r.metrics.filter(m => m.metricName === 'LCP')).toHaveLength(4);
+  });
+
+  it('unreachable site (real Google message, Day 4 scenario test) is not retried', async () => {
+    const dead = u('nxdomain');
+    let n = 0;
+    mockPsi(url => {
+      if (url === dead) { n++; return jsonResponse(400, psiError(400, REAL)); }
+      return jsonResponse(200, psiResponse({ url, field: WEBDEV_FIELD }));
+    });
+    const r = await run([dead]);
+    expect(n).toBe(2); // one call per device, no second pass
+    expect(r.pageFailures.map(f => f.errorCode)).toEqual(['page-unreachable', 'page-unreachable']);
   });
 
   it('second pass is not attempted for quota errors (they cannot recover today)', async () => {

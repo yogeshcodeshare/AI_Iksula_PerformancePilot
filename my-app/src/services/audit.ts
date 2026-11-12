@@ -237,6 +237,14 @@ export type AuditErrorCode =
   | 'quota-exhausted'
   | 'preflight-failed'
   /**
+   * The audited URL itself could not be loaded by Google: HTTP 400
+   * "FAILED_DOCUMENT_REQUEST" / "DNS_FAILURE" with net::ERR_NAME_NOT_RESOLVED,
+   * ERR_CONNECTION_* etc. (found 2026-11 in the Day 4 scenario test with a
+   * non-existent domain, previously shown as a misleading "API error").
+   * A wrong / private URL: NOT retryable.
+   */
+  | 'page-unreachable'
+  /**
    * PSI's Lighthouse run failed on a specific page (HTTP 500
    * "Lighthouse returned error: Something went wrong" or "NO_FCP").
    *
@@ -467,6 +475,21 @@ export function classifyHttpError(status: number, errorBody: { error?: { message
     return {
       code: 'api-error',
       message: `PageSpeed API error ${status}: ${msg || 'server error'}`,
+    };
+  }
+
+  // 4xx where Lighthouse could not load the audited URL at all (bad domain,
+  // DNS, connection refused). The user's URL is the problem, not the API.
+  if (status >= 400 && status < 500 && (
+    lower.includes('failed_document_request') || lower.includes('dns_failure') ||
+    lower.includes('err_name_not_resolved') || lower.includes('err_connection')
+  )) {
+    return {
+      code: 'page-unreachable',
+      message:
+        'Google could not load this URL as a web page: the domain may not exist, the server ' +
+        'refused the connection, or the link is a file/download (e.g. a PDF) rather than an HTML page. ' +
+        'Check the URL is correct and publicly reachable.' + (msg ? ` Details: ${msg}` : ''),
     };
   }
 
