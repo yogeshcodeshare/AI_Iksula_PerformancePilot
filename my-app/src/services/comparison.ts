@@ -9,8 +9,67 @@ import {
   CategoryScore,
   CategoryScoreDelta,
   CategoryName,
-  CWVAssessment
+  CWVAssessment,
+  AuditPage
 } from '@/types';
+
+const TRACKING_PARAMS = /^(utm_.*|gclid|fbclid|msclkid|mc_cid|mc_eid)$/i;
+
+/**
+ * Canonical form of a page URL for matching pages across audit runs.
+ * Ignores scheme, `www.`, trailing slash, fragment and tracking params;
+ * keeps meaningful query params (e.g. search `?q=`), sorted.
+ */
+export function normalizeUrl(raw: string): string {
+  const trimmed = raw.trim();
+  let u: URL;
+  try {
+    u = new URL(/^[a-z]+:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`);
+  } catch {
+    return trimmed.toLowerCase().replace(/\/+$/, '');
+  }
+  const host = u.hostname.toLowerCase().replace(/^www\./, '');
+  const port = u.port ? `:${u.port}` : '';
+  const path = u.pathname.replace(/\/+$/, '');
+  const params = [...u.searchParams.entries()]
+    .filter(([k]) => !TRACKING_PARAMS.test(k))
+    .sort(([a], [b]) => a.localeCompare(b));
+  const query = params.length ? `?${new URLSearchParams(params).toString()}` : '';
+  return `${host}${port}${path}${query}`;
+}
+
+export interface PageMatchResult {
+  pairs: Array<[AuditPage, AuditPage]>;
+  unmatchedBaseline: AuditPage[];
+  unmatchedCurrent: AuditPage[];
+}
+
+/** Pair baseline pages with current pages: 1) normalized URL, 2) label + page type. */
+export function matchPages(baselinePages: AuditPage[], currentPages: AuditPage[]): PageMatchResult {
+  const pairs: Array<[AuditPage, AuditPage]> = [];
+  const remainingCurrent = [...currentPages];
+  const unmatched: AuditPage[] = [];
+
+  const take = (pred: (p: AuditPage) => boolean) => {
+    const i = remainingCurrent.findIndex(pred);
+    return i === -1 ? null : remainingCurrent.splice(i, 1)[0];
+  };
+
+  for (const b of baselinePages) {
+    const key = normalizeUrl(b.url);
+    const c = take(p => normalizeUrl(p.url) === key);
+    if (c) pairs.push([b, c]); else unmatched.push(b);
+  }
+
+  const unmatchedBaseline: AuditPage[] = [];
+  for (const b of unmatched) {
+    const label = b.pageLabel.trim().toLowerCase();
+    const c = label ? take(p => p.pageLabel.trim().toLowerCase() === label && p.pageType === b.pageType) : null;
+    if (c) pairs.push([b, c]); else unmatchedBaseline.push(b);
+  }
+
+  return { pairs, unmatchedBaseline, unmatchedCurrent: remainingCurrent };
+}
 
 export function compareReports(
   baseline: ReportPackage,
@@ -21,25 +80,12 @@ export function compareReports(
   const missingPages: string[] = [];
   const newPages: string[] = [];
   
-  // Create index of baseline pages by URL + type
-  const baselineIndex = new Map(
-    baseline.pages.map(p => [`${p.url}|${p.pageType}`, p])
-  );
-  
-  // Create index of current pages
-  const currentIndex = new Map(
-    current.pages.map(p => [`${p.url}|${p.pageType}`, p])
-  );
-  
-  // Find common pages and compare
-  for (const [key, baselinePage] of baselineIndex) {
-    const currentPage = currentIndex.get(key);
-    
-    if (!currentPage) {
-      missingPages.push(baselinePage.pageLabel);
-      continue;
-    }
-    
+  // Pair pages by normalized URL, then by label (see architecture/comparison-sop.md)
+  const { pairs, unmatchedBaseline, unmatchedCurrent } = matchPages(baseline.pages, current.pages);
+  missingPages.push(...unmatchedBaseline.map(p => p.pageLabel));
+  newPages.push(...unmatchedCurrent.map(p => p.pageLabel));
+
+  for (const [baselinePage, currentPage] of pairs) {
     // Compare metrics for common pages
     const pageDeltas = comparePageMetrics(
       baseline,
@@ -62,14 +108,7 @@ export function compareReports(
     
     categoryScoreDeltas.push(...scoreDeltas);
   }
-  
-  // Find new pages
-  for (const [key, currentPage] of currentIndex) {
-    if (!baselineIndex.has(key)) {
-      newPages.push(currentPage.pageLabel);
-    }
-  }
-  
+
   return {
     deltas,
     categoryScoreDeltas,

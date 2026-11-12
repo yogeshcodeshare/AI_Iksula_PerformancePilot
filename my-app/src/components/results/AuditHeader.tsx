@@ -50,7 +50,7 @@ export function AuditHeader({
         <div className="flex items-center gap-2">
           {baselineProjectName && (
             <div className="flex items-center gap-1 mr-4 bg-primary/10 border border-primary/20 rounded-md">
-              <Link href="/compare/" className="px-3 py-1.5 hover:bg-primary/15 rounded-l-md transition-colors">
+              <Link href={`/compare/?current=${encodeURIComponent(run.runId)}`} className="px-3 py-1.5 hover:bg-primary/15 rounded-l-md transition-colors">
                 <span className="text-xs font-semibold text-primary">Comparing to: {baselineProjectName}</span>
               </Link>
               <Button

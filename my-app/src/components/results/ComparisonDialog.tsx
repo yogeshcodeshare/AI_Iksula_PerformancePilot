@@ -10,9 +10,19 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Upload, XCircle } from 'lucide-react';
+import { Loader2, Upload, XCircle } from 'lucide-react';
 import { ReportPackage } from '@/types';
-import { saveBaselineReport } from '@/services/storage';
+import { importReportPackage, saveBaselineReportAsync } from '@/services/storage';
+
+/** FileReader wrapped in a promise (same browser support as the original implementation). */
+function readFileAsText(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result ?? ''));
+    reader.onerror = () => reject(reader.error);
+    reader.readAsText(file);
+  });
+}
 
 interface ComparisonDialogProps {
   open: boolean;
@@ -22,38 +32,48 @@ interface ComparisonDialogProps {
 
 export function ComparisonDialog({ open, onOpenChange, onBaselineLoaded }: ComparisonDialogProps) {
   const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
 
-  const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
+  const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const input = event.target;
+    const file = input.files?.[0];
+    // Reset so choosing the same file again still fires onChange
+    input.value = '';
     if (!file) return;
 
     setError(null);
 
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      try {
-        const content = e.target?.result as string;
-        const parsed = JSON.parse(content);
+    let text: string;
+    try {
+      text = await readFileAsText(file);
+    } catch {
+      setError('Could not read the file. Please try again.');
+      return;
+    }
 
-        // Validate schema
-        if (!parsed.auditRun || !parsed.pages || !parsed.metrics) {
-          setError('Invalid report format. Missing required fields.');
-          return;
-        }
+    const parsed = importReportPackage(text);
+    if (!parsed) {
+      setError('This is not a PerformancePilot report. Upload the JSON file exported from a Results page (JSON button).');
+      return;
+    }
+    if (parsed.pages.length === 0 || parsed.metrics.length === 0) {
+      setError('This report has no audited pages or metrics, so there is nothing to compare.');
+      return;
+    }
 
-        // Ensure new fields exist for backward compatibility
-        if (!parsed.categoryScores) parsed.categoryScores = [];
-        if (!parsed.diagnostics) parsed.diagnostics = [];
-        if (!parsed.cwvAssessments) parsed.cwvAssessments = [];
+    setSaving(true);
+    try {
+      // Must be awaited: the Compare page reads the baseline from storage (see comparison-sop.md)
+      await saveBaselineReportAsync(parsed);
+    } catch {
+      setError('The report could not be saved in this browser (storage may be full or blocked). Please try again.');
+      return;
+    } finally {
+      setSaving(false);
+    }
 
-        saveBaselineReport(parsed);
-        onBaselineLoaded(parsed);
-        onOpenChange(false);
-      } catch (err) {
-        setError('Failed to parse JSON file. Please ensure it is a valid audit report.');
-      }
-    };
-    reader.readAsText(file);
+    onBaselineLoaded(parsed);
+    onOpenChange(false);
   };
 
   return (
@@ -69,21 +89,27 @@ export function ComparisonDialog({ open, onOpenChange, onBaselineLoaded }: Compa
           <div className="flex items-center justify-center w-full">
             <label className="flex flex-col items-center justify-center w-full h-32 border-2 border-border border-dashed rounded-lg cursor-pointer bg-secondary hover:bg-muted transition-colors">
               <div className="flex flex-col items-center justify-center pt-5 pb-6">
-                <Upload className="w-8 h-8 mb-3 text-muted-foreground" />
-                <p className="mb-2 text-sm text-muted-foreground"><span className="font-semibold">Click to upload</span> or drag and drop</p>
+                {saving
+                  ? <Loader2 className="w-8 h-8 mb-3 text-muted-foreground animate-spin" />
+                  : <Upload className="w-8 h-8 mb-3 text-muted-foreground" />}
+                <p className="mb-2 text-sm text-muted-foreground">
+                  {saving ? 'Saving baseline…' : <><span className="font-semibold">Click to upload</span> or drag and drop</>}
+                </p>
                 <p className="text-xs text-muted-foreground">JSON Audit Report</p>
               </div>
               <Input 
                 type="file" 
                 className="hidden" 
-                accept=".json"
+                accept=".json,application/json"
+                aria-label="Upload baseline JSON report"
+                disabled={saving}
                 onChange={handleFileUpload}
               />
             </label>
           </div>
           
           {error && (
-            <div className="flex items-center gap-2 text-red-600 bg-red-50 p-3 rounded-md border border-red-100">
+            <div role="alert" className="flex items-center gap-2 text-destructive bg-destructive/10 p-3 rounded-md border border-destructive/30">
               <XCircle className="h-4 w-4" />
               <p className="text-xs font-medium">{error}</p>
             </div>

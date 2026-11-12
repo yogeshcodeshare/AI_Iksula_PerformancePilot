@@ -21,7 +21,7 @@ import {
   getSignificantChanges,
   getSignificantCategoryChanges
 } from '@/services/comparison';
-import { getBaselineReportAsync, getAuditStateAsync } from '@/services/storage';
+import { getBaselineReportAsync, getAuditStateAsync, getAuditStateByRunId } from '@/services/storage';
 import { formatMetricValue, formatDate, calculateOverallHealth, cn } from '@/lib/utils';
 import {
   TrendingUp,
@@ -60,9 +60,14 @@ export default function ComparePage() {
 
     async function loadCurrent() {
       let currentAudit = null;
-      const sessionData = sessionStorage.getItem('current-audit-state');
-      if (sessionData) {
-        try { currentAudit = JSON.parse(sessionData); } catch { /* ignore */ }
+      // Prefer the exact run the user came from (/compare/?current=<runId>), see comparison-sop.md
+      const requestedRunId = new URLSearchParams(window.location.search).get('current');
+      if (requestedRunId) currentAudit = await getAuditStateByRunId(requestedRunId);
+      if (!currentAudit) {
+        const sessionData = sessionStorage.getItem('current-audit-state');
+        if (sessionData) {
+          try { currentAudit = JSON.parse(sessionData); } catch { /* ignore */ }
+        }
       }
       if (!currentAudit) currentAudit = await getAuditStateAsync();
       if (currentAudit?.run) {
