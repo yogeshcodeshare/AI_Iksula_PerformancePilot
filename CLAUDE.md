@@ -10,11 +10,10 @@ All commands run from `my-app/`:
 npm run dev        # Dev server → http://localhost:3000
 npm run build      # Static export → dist/
 npm run lint       # ESLint
-```
-
 npm test               # Vitest unit/component tests (src/**/*.test.ts, test/**)
 npm run test:coverage  # with v8 coverage for src/services + src/lib
 npm run test:e2e       # Playwright (e2e/); set E2E_BASE_URL to test a deployed URL
+```
 
 Known bugs are captured as `it.fails` tests (e.g. comparison.test.ts "BUG B.2"); flip them to `it` when fixed.
 
