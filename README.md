@@ -2,6 +2,7 @@
 
 > A production-ready web application for QA teams to run standardized website performance audits using Google PageSpeed Insights with Lighthouse fallback.
 
+[![CI](https://github.com/yogeshcodeshare/AI_Iksula_PerformancePilot/actions/workflows/ci.yml/badge.svg)](https://github.com/yogeshcodeshare/AI_Iksula_PerformancePilot/actions/workflows/ci.yml)
 ![Version](https://img.shields.io/badge/version-1.3.0-blue.svg)
 ![Protocol](https://img.shields.io/badge/B.L.A.S.T.-Protocol-emerald.svg)
 ![Next.js](https://img.shields.io/badge/Next.js-16.1.6-black.svg)
@@ -76,6 +77,21 @@ This project follows the **B.L.A.S.T.** (Blueprint, Link, Architect, Stylize, Tr
    npm run dev
    ```
    Access at: [http://localhost:3000](http://localhost:3000)
+
+## 🧪 Testing
+
+All commands run from `my-app/`:
+
+```bash
+npm test                # unit + component tests (Vitest, jsdom, fake IndexedDB)
+npm run test:coverage   # same, with coverage report in coverage/
+npm run test:e2e        # browser tests (Playwright); PageSpeed API is mocked
+E2E_BASE_URL=https://sitevitals-ai.vercel.app npx playwright test e2e/smoke.spec.ts   # smoke test a deployment
+```
+
+- Test data lives in `my-app/test/fixtures/` (PageSpeed responses, report packages, Google's real 429 body).
+- Every push and pull request runs **GitHub Actions CI**: type check, unit tests with coverage, production build, E2E and an accessibility scan.
+- Details: [docs/testing.md](docs/testing.md). Operations: [docs/runbook.md](docs/runbook.md).
 
 ## ⚙️ Core Web Vitals Thresholds
 
