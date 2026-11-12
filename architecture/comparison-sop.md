@@ -14,7 +14,37 @@ Define how to compare current audit against uploaded previous report.
 - Schema version should match (warn if different)
 - Legacy files (spreadsheets, PDFs) accepted as best-effort with warning
 
-## Comparison Algorithm
+## Page Matching (updated 2026-11, fixes "Compare shows 0 compared")
+
+Pages are paired between baseline and current in two passes. Page type is NOT part of the key,
+because the same URL can be saved as "Homepage" in one run and "Custom Page" (Bulk Add) in another.
+
+1. **Normalized URL**: `normalizeUrl()` in `src/services/comparison.ts`
+   - scheme ignored (http == https)
+   - host lower-cased, leading `www.` removed
+   - trailing `/` removed (`/` and `` are equal)
+   - `#fragment` removed
+   - tracking params removed: `utm_*`, `gclid`, `fbclid`, `msclkid`, `mc_cid`, `mc_eid`
+   - remaining query params kept (search pages need `?q=`) and sorted
+2. **Label fallback**: still-unpaired pages are paired by case-insensitive `pageLabel` + `pageType`.
+
+Anything left unpaired is reported as missing (baseline only) or new (current only).
+
+### Required behaviour
+- `https://web.dev` and `https://web.dev/` → same page
+- `https://www.shop.test/pdp` and `https://shop.test/pdp?utm_source=mail` → same page
+- `https://shop.test/search?q=shoes` and `https://shop.test/search?q=bags` → different pages
+
+## Baseline Upload
+- Validate with `importReportPackage()` (single validator for dialog and storage).
+- **Await** `saveBaselineReportAsync()` before reporting success. Never fire-and-forget.
+- Show the user any validation or storage error. Never swallow it.
+
+## Choosing the Current Run
+- The Compare page reads `?current=<runId>` and loads that run via `getAuditStateByRunId()`.
+- Fallback when the param is absent: session state, then the last saved run.
+
+## Comparison Algorithm (delta calculation)
 
 ```typescript
 function compareAudits(baseline: ReportPackage, current: ReportPackage): ComparisonResult {

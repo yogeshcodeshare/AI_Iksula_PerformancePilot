@@ -7,7 +7,7 @@ import { useResultsFilters } from '@/hooks/useResultsFilters';
 import { useDiagnosticWorkspace } from '@/hooks/useDiagnosticWorkspace';
 import { generateReportPackage, downloadJSON, downloadPDF, downloadPackage } from '@/services/export';
 import { getBaselineReportAsync, clearBaselineReport } from '@/services/storage';
-import { compareReports } from '@/services/comparison';
+import { compareReports, normalizeUrl } from '@/services/comparison';
 import { Activity, AlertCircle, ShieldCheck } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import Link from 'next/link';
@@ -194,7 +194,7 @@ function ResultsContent() {
             baselineCategoryScores={
               baselineReport?.categoryScores?.filter(cs => {
                 const bPage = baselineReport?.pages.find(p => p.pageId === cs.pageId);
-                return bPage && bPage.url === workspace.actPage?.url && cs.device === workspace.workspaceDevice;
+                return !!bPage && !!workspace.actPage && normalizeUrl(bPage.url) === normalizeUrl(workspace.actPage.url) && cs.device === workspace.workspaceDevice;
               }) || []
             }
           />

@@ -6,6 +6,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Textarea } from '@/components/ui/textarea';
 import { PageFormData, PageType } from '@/types';
 import { PAGE_TYPES, ENVIRONMENTS } from '@/lib/constants';
+import { mergeBulkUrls } from '@/lib/pageForm';
+import { normalizeUrl } from '@/services/comparison';
 import Link from 'next/link';
 
 export default function NewAudit() {
@@ -36,13 +38,7 @@ export default function NewAudit() {
   };
 
   const handleBulkAdd = () => {
-    const urls = bulkUrls.split('\n').filter(url => url.trim());
-    const newPages = urls.map(url => ({
-      pageLabel: '',
-      pageType: 'custom' as PageType,
-      url: url.trim()
-    }));
-    setPages([...pages, ...newPages]);
+    setPages(mergeBulkUrls(pages, bulkUrls));
     setBulkUrls('');
     setShowBulkAdd(false);
   };
@@ -71,8 +67,11 @@ export default function NewAudit() {
       }
     });
 
-    const urls = pages.map(p => p.url.trim());
-    const duplicates = urls.filter((item, index) => urls.indexOf(item) !== index);
+    // Same page typed two ways (https://site.com vs https://site.com/) counts as a duplicate
+    const keys = pages.map(p => normalizeUrl(p.url));
+    const duplicates = pages
+      .filter((p, index) => p.url.trim() && keys.indexOf(keys[index]) !== index)
+      .map(p => p.url.trim());
     if (duplicates.length > 0) {
       newErrors.push(`Duplicate URLs found: ${duplicates.join(', ')}`);
     }

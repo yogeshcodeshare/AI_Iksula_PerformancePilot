@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { compareReports, getSignificantChanges, generateComparisonSummary } from './comparison';
+import { compareReports, getSignificantChanges, generateComparisonSummary, normalizeUrl, matchPages } from './comparison';
 import { makeReport } from '../../test/fixtures/reports';
 
 describe('compareReports', () => {
@@ -71,21 +71,71 @@ describe('improvement ordering', () => {
 });
 
 /**
- * BUG REPRODUCTION (user feedback: "compare feature does not work").
- * These document the current broken behaviour and are expected to FAIL today.
- * `it.fails` keeps the suite green; when the fix lands (plan Day 3 / B.2)
- * Vitest will report them as unexpectedly passing and they become normal `it` tests.
+ * REGRESSION (user feedback: "compare feature does not work").
+ * Reproduced on production on Day 1 as it.fails; fixed on Day 3 (B.2).
  */
-describe('BUG B.2 – compare matches URLs too strictly', () => {
-  it.fails('treats https://shop.test and https://shop.test/ as the same page', () => {
+describe('B.2 – compare matches the same page typed differently', () => {
+  it('treats https://shop.test and https://shop.test/ as the same page', () => {
     const base = makeReport('A', [{ url: 'https://shop.test' }]);
     const cur = makeReport('B', [{ url: 'https://shop.test/' }]);
     expect(compareReports(base, cur).missingPages).toEqual([]);
   });
 
-  it.fails('ignores www / tracking params when matching pages', () => {
+  it('ignores www / tracking params when matching pages', () => {
     const base = makeReport('A', [{ url: 'https://www.shop.test/pdp' }]);
     const cur = makeReport('B', [{ url: 'https://shop.test/pdp?utm_source=mail' }]);
     expect(compareReports(base, cur).deltas.length).toBeGreaterThan(0);
+  });
+});
+
+describe('normalizeUrl', () => {
+  it.each([
+    ['https://web.dev', 'web.dev'],
+    ['https://web.dev/', 'web.dev'],
+    ['http://WWW.Web.Dev/', 'web.dev'],
+    ['https://shop.test/pdp/?utm_source=mail&utm_medium=x#reviews', 'shop.test/pdp'],
+    ['https://shop.test/search?q=shoes&gclid=abc', 'shop.test/search?q=shoes'],
+    ['https://shop.test/list?sort=asc&page=2', 'shop.test/list?page=2&sort=asc'],
+    ['shop.test/pdp', 'shop.test/pdp'],
+  ])('%s -> %s', (input, expected) => expect(normalizeUrl(input)).toBe(expected));
+
+  it('keeps different search queries apart', () => {
+    expect(normalizeUrl('https://shop.test/search?q=shoes')).not.toBe(normalizeUrl('https://shop.test/search?q=bags'));
+  });
+});
+
+describe('matchPages', () => {
+  const page = (id: string, url: string, pageLabel: string, pageType = 'homepage') =>
+    ({ pageId: id, runId: 'r', url, pageLabel, pageType, sortOrder: 0 }) as never;
+
+  it('pairs the same URL even when page type changed (Homepage vs Bulk Add "custom")', () => {
+    const r = matchPages([page('b1', 'https://web.dev/', 'Homepage', 'homepage')], [page('c1', 'https://web.dev', 'web.dev', 'custom')]);
+    expect(r.pairs).toHaveLength(1);
+    expect(r.unmatchedBaseline).toEqual([]);
+  });
+
+  it('falls back to label + type when the URL changed', () => {
+    const r = matchPages([page('b1', 'https://old.shop.test/p/1', 'PDP', 'pdp')], [page('c1', 'https://shop.test/p/1', 'pdp', 'pdp')]);
+    expect(r.pairs.map(([b, c]) => [b.pageId, c.pageId])).toEqual([['b1', 'c1']]);
+  });
+
+  it('never pairs one current page twice', () => {
+    const r = matchPages(
+      [page('b1', 'https://shop.test/', 'Home'), page('b2', 'https://shop.test', 'Home again')],
+      [page('c1', 'https://shop.test/', 'Home')],
+    );
+    expect(r.pairs).toHaveLength(1);
+    expect(r.unmatchedBaseline.map(p => p.pageId)).toEqual(['b2']);
+  });
+});
+
+describe('compareReports – page type changed between runs', () => {
+  it('still compares metrics', () => {
+    const base = makeReport('A', [{ url: 'https://web.dev/', pageType: 'homepage' }]);
+    const cur = makeReport('B', [{ url: 'https://web.dev', pageType: 'custom' }]);
+    const r = compareReports(base, cur);
+    expect(r.deltas).toHaveLength(10);
+    expect(r.missingPages).toEqual([]);
+    expect(r.newPages).toEqual([]);
   });
 });
