@@ -51,7 +51,7 @@ interface PageSpeedCategory {
   score: number;
 }
 
-interface PageSpeedResponse {
+export interface PageSpeedResponse {
   id: string;
   // CrUX Field Data (real user metrics) - URL-level
   loadingExperience?: {
@@ -353,7 +353,8 @@ async function throttledFetchPageSpeed(url: string, device: Device, timeoutMs: n
  * Spec (RFC 7231): either a delta in seconds, or an HTTP-date.
  * Returns null when absent or unparseable.
  */
-function parseRetryAfter(header: string | null): number | null {
+/** @internal exported for unit tests */
+export function parseRetryAfter(header: string | null): number | null {
   if (!header) return null;
   const seconds = Number(header);
   if (Number.isFinite(seconds) && seconds >= 0) {
@@ -376,7 +377,8 @@ function parseRetryAfter(header: string | null): number | null {
  *   - 429 (other) → rate-limit (per-minute burst; cooldown helps)
  *   - 5xx → api-error (often soft-throttle per GoogleChrome/lighthouse#16853; long cooldown helps)
  */
-function classifyHttpError(status: number, errorBody: { error?: { message?: string; status?: string; details?: unknown[] } }): {
+/** @internal exported for unit tests */
+export function classifyHttpError(status: number, errorBody: { error?: { message?: string; status?: string; details?: unknown[] } }): {
   code: AuditErrorCode;
   message: string;
 } {
@@ -457,7 +459,8 @@ function classifyHttpError(status: number, errorBody: { error?: { message?: stri
  * Classify a thrown fetch-layer error (no HTTP response received).
  * AbortError = our own timeout. Other errors are network-level.
  */
-function classifyFetchError(error: unknown): { code: AuditErrorCode; message: string } {
+/** @internal exported for unit tests */
+export function classifyFetchError(error: unknown): { code: AuditErrorCode; message: string } {
   if (error instanceof Error && error.name === 'AbortError') {
     return {
       code: 'timeout',
@@ -614,7 +617,8 @@ async function runLighthouse(_url: string, _device: Device): Promise<PageSpeedRe
 /**
  * Check if a response has usable data
  */
-function isComplete(response: PageSpeedResponse): boolean {
+/** @internal exported for unit tests */
+export function isComplete(response: PageSpeedResponse): boolean {
   // Check URL-level CrUX field data first
   const cruxMetrics = response.loadingExperience?.metrics;
   if (cruxMetrics?.LARGEST_CONTENTFUL_PAINT_MS?.percentile !== undefined) {
@@ -640,7 +644,8 @@ function isComplete(response: PageSpeedResponse): boolean {
 /**
  * Extract metrics from API response
  */
-function extractMetrics(
+/** @internal exported for unit tests */
+export function extractMetrics(
   response: PageSpeedResponse,
   pageId: string,
   device: Device,
@@ -991,7 +996,8 @@ function extractMetrics(
 /**
  * Extract category scores from PageSpeed response
  */
-function extractCategoryScores(
+/** @internal exported for unit tests */
+export function extractCategoryScores(
   response: PageSpeedResponse,
   pageId: string,
   device: Device,
@@ -1030,7 +1036,8 @@ function extractCategoryScores(
 /**
  * Convert Lighthouse score to diagnostic status
  */
-function scoreToStatus(
+/** @internal exported for unit tests */
+export function scoreToStatus(
   score: number | null,
   scoreDisplayMode: string
 ): DiagnosticStatus {
@@ -1076,7 +1083,8 @@ function getDiagnosticGroup(auditKey: string, category: CategoryName): Diagnosti
  * Extract diagnostic items from PageSpeed response
  * Uses the Lighthouse category→auditRefs to correctly assign audits to categories.
  */
-function extractDiagnostics(
+/** @internal exported for unit tests */
+export function extractDiagnostics(
   response: PageSpeedResponse,
   pageId: string,
   device: Device,
@@ -1255,7 +1263,8 @@ function extractDiagnostics(
 /**
  * Generate CWV Assessment for a page/device
  */
-function generateCWVAssessment(
+/** @internal exported for unit tests */
+export function generateCWVAssessment(
   metrics: MetricResult[],
   pageId: string,
   device: Device,
@@ -1571,7 +1580,8 @@ export interface FullAuditResult {
 export const MAX_RETRY_ATTEMPTS = 3;
 
 /** Bounded backoff delays (ms) based on retry attempt number (1-indexed): 2s, 4s, 8s */
-function retryDelay(attempt: number): number {
+/** @internal exported for unit tests */
+export function retryDelay(attempt: number): number {
   return Math.min(2000 * Math.pow(2, attempt - 1), 8000);
 }
 
