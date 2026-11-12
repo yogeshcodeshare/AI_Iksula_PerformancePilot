@@ -12,6 +12,8 @@ import {
   ArrowRight,
 } from 'lucide-react';
 import Link from 'next/link';
+import { buildFailureIssueUrl } from '@/lib/issueReport';
+import { APP_VERSION } from '@/lib/constants';
 
 interface PageProgress {
   pageLabel: string;
@@ -618,6 +620,22 @@ export default function AuditProgressPage() {
                   <Button onClick={handleFullRetry} variant="outline" className="border-border text-muted-foreground h-10 px-4 rounded-[10px]">
                     <RotateCcw className="h-4 w-4 mr-2" /> Full Re-run
                   </Button>
+                )}
+                {failureCount > 0 && !isRetrying && lastSavedStateRef.current?.run && (
+                  <a
+                    href={buildFailureIssueUrl(
+                      lastSavedStateRef.current.run,
+                      lastSavedStateRef.current.pages,
+                      lastSavedStateRef.current.pageFailures ?? [],
+                      APP_VERSION,
+                    )}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    title="Opens a pre-filled GitHub issue with the failed URLs and error codes. Review it before submitting."
+                    className="px-4 py-2 text-sm font-medium border border-border rounded-[10px] text-muted-foreground hover:text-foreground transition-colors no-underline"
+                  >
+                    Report on GitHub
+                  </a>
                 )}
               </>
             )}

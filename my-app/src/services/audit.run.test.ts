@@ -113,6 +113,40 @@ describe('runAudit', () => {
     expect(r.pageFailures.every(f => f.errorCode === 'psi-page-error')).toBe(true);
   });
 
+  it('second pass: a URL that fails under load is retried automatically and recovers', async () => {
+    const busy = u('busy');
+    let busyCalls = 0;
+    mockPsi((url, strategy) => {
+      if (url === busy && strategy === 'mobile' && busyCalls++ === 0) {
+        return jsonResponse(503, psiError(503, 'Backend Error')); // api-error: Google-side
+      }
+      return jsonResponse(200, psiResponse({ url, field: WEBDEV_FIELD }));
+    });
+    const r = await run([busy, u('ok')]);
+    expect(r.pageFailures).toEqual([]);
+    expect(busyCalls).toBe(2); // original + one automatic second-pass call
+    expect(r.metrics.filter(m => m.metricName === 'LCP')).toHaveLength(4);
+  });
+
+  it('second pass is not attempted for quota errors (they cannot recover today)', async () => {
+    const q = u('quota');
+    let qCalls = 0;
+    mockPsi(url => {
+      if (url === q) { qCalls++; return jsonResponse(429, psiError(429, "Quota exceeded for quota metric 'Queries' and limit 'Queries per day'")); }
+      return jsonResponse(200, psiResponse({ url, field: WEBDEV_FIELD }));
+    });
+    const r = await run([q]);
+    expect(qCalls).toBe(1);
+    expect(r.pageFailures.every(f => f.errorCode === 'quota-exhausted')).toBe(true);
+  });
+
+  it('preflight always calls Google (never served from the hourly cache)', async () => {
+    mockPsi(url => jsonResponse(200, psiResponse({ url, field: WEBDEV_FIELD })));
+    await run([u('a')]);
+    await run([u('b')]);
+    expect(calls.filter(c => c.url === 'https://www.google.com/')).toHaveLength(2);
+  });
+
   it('a request that never answers is timed out and reported as timeout', async () => {
     const slow = u('slow');
     vi.stubGlobal('fetch', vi.fn((input: string, init?: RequestInit) => {

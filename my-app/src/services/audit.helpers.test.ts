@@ -2,7 +2,7 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import {
   parseRetryAfter, classifyHttpError, classifyFetchError, isComplete, extractMetrics,
   extractCategoryScores, extractDiagnostics, scoreToStatus, generateCWVAssessment,
-  retryDelay, getPageConcurrency,
+  retryDelay, getPageConcurrency, isRetryableError,
 } from './audit';
 import { psiResponse, WEBDEV_FIELD } from '../../test/fixtures/psi';
 import quota429 from '../../test/fixtures/psi-429-quota.json';
@@ -133,8 +133,12 @@ describe('generateCWVAssessment', () => {
 });
 
 describe('retry & concurrency policy', () => {
-  it('retryDelay backs off 2 s, 4 s, 8 s and caps at 8 s', () => {
-    expect([1, 2, 3, 4].map(retryDelay)).toEqual([2000, 4000, 8000, 8000]);
+  it('manual retry waits 30 s, 60 s, 120 s (outside PSI soft-throttle) and caps at 120 s', () => {
+    expect([1, 2, 3, 4].map(retryDelay)).toEqual([30_000, 60_000, 120_000, 120_000]);
+  });
+  it('only Google-side / transient errors are retryable', () => {
+    for (const c of ['timeout', 'rate-limit', 'api-error', 'network', 'no-data', 'psi-page-error']) expect(isRetryableError(c), c).toBe(true);
+    for (const c of ['quota-exhausted', 'referer-blocked', 'permission-denied', 'preflight-failed', undefined]) expect(isRetryableError(c), String(c)).toBe(false);
   });
   it('runs sequentially without an API key', () => {
     vi.stubEnv('NEXT_PUBLIC_PAGESPEED_API_KEY', '');
