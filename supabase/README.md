@@ -30,3 +30,19 @@ where created_at > now() - interval '7 days'
 group by error_code
 order by failures desc;
 ```
+
+## Migrations applied so far
+| File | Phase | What |
+|---|---|---|
+| `20261116000001_audit_failures.sql` | A | Error log table, RLS, rate limit, 90-day cleanup |
+| `20261116000002_audit_failures_hardening.sql` | A | Advisor fixes |
+| `20261116000003_auth_iksula_only.sql` | B | Only @iksula.com accounts |
+| `20261116000004_audit_runs.sql` | C | Saved runs for team history and compare-from-list |
+
+Apply new migrations in the **SQL Editor** (paste the file, Run). Supabase asks a person to confirm database changes.
+
+## Verify Phase C (after the deploy)
+1. Log in as an Iksula user and run a small audit. The dashboard **Saved audits → My audits** lists it.
+2. Log in on another browser or computer: the run is still there.
+3. Tick two runs → **Compare selected** opens the comparison without any file upload.
+4. **Failures** (navbar) lists the error log.

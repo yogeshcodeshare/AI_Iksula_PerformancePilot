@@ -8,6 +8,7 @@
 import { useState, useEffect } from 'react';
 import { AuditState } from '@/types';
 import { getAuditStateAsync, getSessionAuditState, getAuditStateByRunId } from '@/services/storage';
+import { getRunReport, reportToState } from '@/services/runStore';
 
 interface UseAuditStateResult {
   state: AuditState | null;
@@ -35,6 +36,16 @@ export function useAuditState(runId?: string | null): UseAuditStateResult {
           const specificRun = await getAuditStateByRunId(runId);
           if (specificRun && !cancelled) {
             setState(specificRun);
+            setIsLoading(false);
+            return;
+          }
+        }
+
+        // 1b. Not in this browser: a run saved to the team database (logged-in QA)
+        if (runId) {
+          const report = await getRunReport(runId);
+          if (report && !cancelled) {
+            setState(reportToState(report));
             setIsLoading(false);
             return;
           }

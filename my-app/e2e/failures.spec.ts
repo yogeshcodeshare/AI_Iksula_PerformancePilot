@@ -34,3 +34,8 @@ test('login page without Supabase config: no form, guests unaffected', async ({ 
   await page.goto('/');
   await expect(page.getByRole('link', { name: 'Team login' })).toHaveCount(0);
 });
+
+test('failures page is team-only (no Supabase config: shows login hint)', async ({ page }) => {
+  await page.goto('/failures/');
+  await expect(page.getByText(/error log is available to the Iksula QA team/)).toBeVisible();
+});
