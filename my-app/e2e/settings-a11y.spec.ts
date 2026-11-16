@@ -15,7 +15,7 @@ test('threshold settings are saved and survive a reload', async ({ page }) => {
  * Gate: no CRITICAL violations. Serious/moderate ones are attached to the
  * report for follow-up rather than failing the build.
  */
-for (const path of ['/', '/audit/', '/settings/', '/about/']) {
+for (const path of ['/', '/audit/', '/settings/', '/about/', '/login/', '/account/']) {
   test(`accessibility: no critical violations on ${path}`, async ({ page }, testInfo) => {
     await page.goto(path);
     await page.waitForLoadState('networkidle');

@@ -3,6 +3,31 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { Settings } from 'lucide-react';
+import { useAuth } from '@/lib/auth';
+
+/** Log in / logged-in user. Renders nothing when login is not configured. */
+function AccountMenu() {
+    const { enabled, ready, email, signOut } = useAuth();
+    if (!enabled || !ready) return null;
+    if (!email) {
+        return (
+            <Link href="/login/" className="text-sm font-medium text-muted-foreground hover:text-foreground no-underline">
+                Team login
+            </Link>
+        );
+    }
+    return (
+        <div className="flex items-center gap-3 text-sm">
+            <Link href="/account/" className="text-muted-foreground hover:text-foreground no-underline" title="Account">
+                {email}
+            </Link>
+            <button type="button" onClick={() => void signOut()}
+                className="text-muted-foreground hover:text-foreground underline bg-transparent border-none cursor-pointer p-0">
+                Sign out
+            </button>
+        </div>
+    );
+}
 
 export function Navbar() {
     const pathname = usePathname();
@@ -57,8 +82,9 @@ export function Navbar() {
                     </div>
                 </div>
 
-                {/* Right: Settings */}
+                {/* Right: Account + Settings */}
                 <div className="flex items-center gap-3">
+                    <AccountMenu />
                     <Link
                         href="/settings"
                         aria-label="Settings"

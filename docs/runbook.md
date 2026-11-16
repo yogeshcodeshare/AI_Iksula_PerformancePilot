@@ -38,3 +38,18 @@ E2E_BASE_URL=https://sitevitals-ai.vercel.app npx playwright test e2e/smoke.spec
 - Some pages are too slow for Google PageSpeed itself (e.g. ajio.com mobile in Nov 2026 tests). The app reports them clearly, but cannot force success.
 - A 404 page or a login redirect is scored as whatever page loads (reported as success). Follow-up planned.
 - Central failure log: code ready (Phase A); active once Supabase is configured (see `supabase/README.md`).
+
+## Team accounts (Phase B login)
+Login is for the Iksula QA team only (`@iksula.com`). Guests use every audit feature without an account. There is no sign-up form.
+
+**One-time Supabase settings (Authentication):**
+- Sign In / Providers: "Allow new users to sign up" **OFF**, "Confirm email" **ON**, Email provider **enabled**.
+- URL Configuration: Site URL `https://sitevitals-ai.vercel.app`. Redirect URLs: `https://sitevitals-ai.vercel.app/**`, `https://*-yogeshcodeshares-projects.vercel.app/**`, `http://localhost:3000/**`.
+
+**Add a team member:** Supabase → Authentication → Users → **Add user → Send invitation** → enter their `@iksula.com` email. They receive an email, click the link, land on `/account/`, and set their own password (8+ characters). Non-Iksula emails are rejected by the database.
+
+**Remove a team member:** Supabase → Authentication → Users → find the user → **Delete user**. They are signed out at their next token refresh (within an hour) and cannot sign in again.
+
+**Forgotten password:** the user clicks "Forgot password?" on `/login/`, or uses "Email me a sign-in link".
+
+**Note:** Supabase's built-in email service sends only a few emails per hour on the free plan. For the first batch of invites, send them a few minutes apart, or configure a custom SMTP sender (Authentication → Emails → SMTP Settings).
