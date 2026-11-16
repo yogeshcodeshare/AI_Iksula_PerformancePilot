@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import Link from 'next/link';
 import { buildFailureIssueUrl } from '@/lib/issueReport';
+import { logFailures } from '@/services/errorLog';
 import { APP_VERSION } from '@/lib/constants';
 
 interface PageProgress {
@@ -226,6 +227,8 @@ export default function AuditProgressPage() {
       setRunId(result.run.runId.substring(0, 8).toUpperCase());
       const failCount = result.pageFailures?.length ?? 0;
       setFailureCount(failCount);
+      // Central error log (no-op when Supabase is not configured; never blocks)
+      void logFailures(result.pageFailures, { runId: result.run.runId, pages: result.pages, phase: 'run' });
       setOverallProgress(100);
       setStats({
         metricsCollected: result.metrics.length,
@@ -245,6 +248,14 @@ export default function AuditProgressPage() {
       const errorCode = (err as { errorCode?: string })?.errorCode;
       const underlying = (err as { underlyingCode?: AuditErrorCode })?.underlyingCode;
       const baseMsg = err instanceof Error ? err.message : 'Unknown error occurred';
+      // The whole run could not start (e.g. API key / quota problem): log one row per page
+      if (data?.pages?.length) {
+        const pages = data.pages.map((p, i) => ({ pageId: `p${i}`, url: p.url }));
+        void logFailures(
+          pages.map(p => ({ pageId: p.pageId, device: 'mobile', errorCode: underlying ?? errorCode ?? 'api-error', errorMessage: baseMsg })),
+          { runId: crypto.randomUUID(), pages, phase: 'run' },
+        );
+      }
       const prefix =
         errorCode === 'preflight-failed' && underlying
           ? `[${ERROR_CODE_LABELS[underlying]?.short ?? underlying}] `
@@ -307,6 +318,9 @@ export default function AuditProgressPage() {
 
       const failCount = result.pageFailures?.length ?? 0;
       setFailureCount(failCount);
+      if (result.run) {
+        void logFailures(result.pageFailures, { runId: result.run.runId, pages: result.pages, phase: 'retry' });
+      }
       setOverallProgress(100);
       setStats({
         metricsCollected: result.metrics.length,

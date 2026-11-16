@@ -9,6 +9,7 @@
 | Variable | Where | Purpose |
 |---|---|---|
 | `NEXT_PUBLIC_PAGESPEED_API_KEY` | Vercel project env vars, `my-app/.env.local` locally | Google PageSpeed Insights API key. Without it, Google allows ~1 request / 100 s and a very small daily quota. |
+| `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Vercel env vars (optional) | Turn on central error logging (and later login). Public values; access is enforced by Row Level Security. Setup: `supabase/README.md`. Never add the service-role key. |
 
 The key is public in the browser bundle by design. Protect it in Google Cloud Console: **API restrictions** = PageSpeed Insights API only, **HTTP referrers** = `sitevitals-ai.vercel.app/*`, `*.vercel.app/*` (previews), `localhost:3000/*`.
 
@@ -36,4 +37,4 @@ E2E_BASE_URL=https://sitevitals-ai.vercel.app npx playwright test e2e/smoke.spec
 ## Known limits
 - Some pages are too slow for Google PageSpeed itself (e.g. ajio.com mobile in Nov 2026 tests). The app reports them clearly, but cannot force success.
 - A 404 page or a login redirect is scored as whatever page loads (reported as success). Follow-up planned.
-- There is no central failure log yet. Proposal: a small serverless endpoint plus a log table (see the project plan).
+- Central failure log: code ready (Phase A); active once Supabase is configured (see `supabase/README.md`).

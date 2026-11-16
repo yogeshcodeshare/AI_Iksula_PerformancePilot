@@ -7,6 +7,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { PageFormData, PageType } from '@/types';
 import { PAGE_TYPES, ENVIRONMENTS } from '@/lib/constants';
 import { mergeBulkUrls } from '@/lib/pageForm';
+import { ErrorLogNotice } from '@/components/ErrorLogNotice';
 import { normalizeUrl } from '@/services/comparison';
 import Link from 'next/link';
 
@@ -301,6 +302,7 @@ export default function NewAudit() {
                 Each page will be audited for both <strong>Mobile</strong> and <strong>Desktop</strong> viewports. PageSpeed Insights provides real-user field data when available, with Lighthouse lab data as fallback.
               </p>
             </div>
+            <ErrorLogNotice />
           </div>
         </div>
       </main>
