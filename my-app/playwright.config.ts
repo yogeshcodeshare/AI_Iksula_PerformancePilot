@@ -14,5 +14,8 @@ export default defineConfig({
   projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
   webServer: process.env.E2E_BASE_URL
     ? undefined
-    : { command: 'npm run dev', url: 'http://localhost:3000', reuseExistingServer: true, timeout: 120_000 },
+    // Test the real production output (static export in dist/), not `next dev`:
+    // dev mode runs effects twice (React StrictMode), which starts every audit twice,
+    // and compiles each page on first request (very slow). Run `npm run build` first.
+    : { command: 'npm run serve:dist', url: 'http://localhost:3000', reuseExistingServer: !process.env.CI, timeout: 60_000 },
 });

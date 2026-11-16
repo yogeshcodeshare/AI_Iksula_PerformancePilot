@@ -117,10 +117,10 @@ export default function SettingsPage() {
       <main className="max-w-[768px] mx-auto px-6 py-10">
         {/* Header */}
         <div className="flex items-center gap-4 mb-2">
-          <Link href="/">
-            <button className="p-1.5 rounded-lg border border-border bg-transparent text-muted-foreground hover:bg-muted hover:text-foreground transition-colors cursor-pointer">
+          <Link href="/" aria-label="Back to dashboard" title="Back to dashboard" className="inline-flex p-1.5 rounded-lg border border-border bg-transparent text-muted-foreground hover:bg-muted hover:text-foreground transition-colors cursor-pointer">
+            <span aria-hidden="true">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5}><path d="m15 18-6-6 6-6"/></svg>
-            </button>
+            </span>
           </Link>
           <div>
             <h1 className="text-[26px] font-bold text-foreground tracking-[-0.03em]">Settings</h1>
@@ -199,6 +199,7 @@ export default function SettingsPage() {
                           type="number"
                           step={config.unit === 'ms' ? 100 : 0.01}
                           value={config.good}
+                          aria-label={`${key} good threshold${config.unit === 'ms' ? ' (ms)' : ''}`}
                           onChange={(e) => updateThreshold(key as keyof typeof THRESHOLDS, 'good', e.target.value)}
                           className="font-mono bg-card border-border"
                         />
@@ -212,6 +213,7 @@ export default function SettingsPage() {
                           type="number"
                           step={config.unit === 'ms' ? 100 : 0.01}
                           value={config.warn}
+                          aria-label={`${key} warning threshold${config.unit === 'ms' ? ' (ms)' : ''}`}
                           onChange={(e) => updateThreshold(key as keyof typeof THRESHOLDS, 'warn', e.target.value)}
                           className="font-mono bg-card border-border"
                         />

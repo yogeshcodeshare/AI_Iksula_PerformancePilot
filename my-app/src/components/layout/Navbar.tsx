@@ -59,10 +59,13 @@ export function Navbar() {
 
                 {/* Right: Settings */}
                 <div className="flex items-center gap-3">
-                    <Link href="/settings">
-                        <button className="p-2 rounded-lg border border-border bg-transparent text-muted-foreground hover:bg-muted hover:text-foreground transition-colors cursor-pointer">
-                            <Settings className="h-[18px] w-[18px]" strokeWidth={1.5} />
-                        </button>
+                    <Link
+                        href="/settings"
+                        aria-label="Settings"
+                        title="Settings"
+                        className="inline-flex p-2 rounded-lg border border-border bg-transparent text-muted-foreground hover:bg-muted hover:text-foreground transition-colors cursor-pointer"
+                    >
+                        <Settings className="h-[18px] w-[18px]" strokeWidth={1.5} aria-hidden="true" />
                     </Link>
                 </div>
             </div>

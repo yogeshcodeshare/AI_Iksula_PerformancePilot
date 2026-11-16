@@ -77,11 +77,15 @@ IndexedDB wrapper is in `src/services/db.ts` (store name: `audits`, DB: `AIAudit
 ### Audit Engine (`src/services/audit.ts`)
 
 - **Dynamic concurrency** — `getPageConcurrency(pageCount)` (exported) scales parallelism based on audit size: 2 (≤8 pages), 3 (≤15), 4 (≤25), 5 (26+). Without an API key, falls back to 1 (sequential). Mobile + desktop for the same page always run sequentially (Google queues same-URL parallel calls). The progress page dynamically displays the concurrency level in the Protocol info card.
-- `PAGESPEED_TIMEOUT_MS = 90_000` — 90s timeout. Heavy e-commerce pages (Amazon PDPs) can take 60-80s. Retry mechanism provides additional coverage.
+- `PAGESPEED_TIMEOUT_MS = 120_000` (120 s) for the first attempt, `PAGESPEED_RETRY_TIMEOUT_MS = 150_000` for retries. Heavy, bot-protected pages can take 80-150 s.
 - **Throttled fetch** — 300ms minimum gap between API calls to avoid burst pressure.
 - **Adaptive throttle-back** — on HTTP 429, concurrency drops to 1 with 3s cooldown. Audit never aborts.
 - Data source priority per metric: **URL-level CrUX** → **origin-level CrUX** → **Lighthouse lab data**
-- `MAX_RETRY_ATTEMPTS = 3` with exponential backoff (2s, 4s, 8s). `retryFailedItems()` only re-runs failed page+device combos; successful results are preserved.
+- **Automatic second pass** (end of `runAudit`): transient failures (`timeout`, `rate-limit`, `api-error`, `network`, `no-data`) are retried once, one at a time, after `SECOND_PASS_COOLDOWN_MS` (30 s). `psi-page-error` is excluded (already retried in-line 30/60/120 s).
+- `MAX_RETRY_ATTEMPTS = 3` manual retries with cooldown 30 s / 60 s / 120 s (`retryDelay`), **sequential**. `retryFailedItems()` only re-runs failed page+device combos and skips non-retryable codes (`isRetryableError`): `quota-exhausted`, `referer-blocked`, `permission-denied`, `page-unreachable`.
+- `page-unreachable`: PSI 400 `FAILED_DOCUMENT_REQUEST` / `ERR_CONNECTION_*` / `ERR_NAME_NOT_RESOLVED` (bad domain, PDF/download link). Never retried.
+- `preflightCheck()` bypasses the in-memory hourly PSI cache.
+- Progress page "Report on GitHub" builds a prefilled issue URL (`src/lib/issueReport.ts`); no token/server.
 - The PSI API URL must include all four category params: `&category=PERFORMANCE&category=ACCESSIBILITY&category=BEST_PRACTICES&category=SEO` — dropping any category silently omits that section's Lighthouse data.
 - Lighthouse CLI fallback (`runLighthouse()`) always throws — it is not implemented. The "fallback" is actually origin-level CrUX and Lighthouse lab data extracted from the PSI response itself.
 
