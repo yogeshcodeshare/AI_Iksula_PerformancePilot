@@ -179,6 +179,7 @@ export default function Dashboard() {
             <input
               type="file"
               accept=".json"
+              aria-label="Upload baseline JSON report to compare runs"
               onChange={handleFileUpload}
               className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
             />

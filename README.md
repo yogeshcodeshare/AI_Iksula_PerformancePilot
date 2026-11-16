@@ -85,7 +85,7 @@ All commands run from `my-app/`:
 ```bash
 npm test                # unit + component tests (Vitest, jsdom, fake IndexedDB)
 npm run test:coverage   # same, with coverage report in coverage/
-npm run test:e2e        # browser tests (Playwright); PageSpeed API is mocked
+npm run build && npm run test:e2e   # browser tests on the production build; PageSpeed API is mocked
 E2E_BASE_URL=https://sitevitals-ai.vercel.app npx playwright test e2e/smoke.spec.ts   # smoke test a deployment
 ```
 

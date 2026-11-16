@@ -13,7 +13,7 @@ PerformancePilot has three test layers. All run offline: the Google PageSpeed AP
 ```bash
 npm test                 # unit + component
 npm run test:coverage    # with coverage (coverage/index.html)
-npm run test:e2e         # E2E; starts `npm run dev` automatically
+npm run build && npm run test:e2e   # E2E runs against the production build (dist/), served on :3000
 npx playwright show-report
 E2E_BASE_URL=https://sitevitals-ai.vercel.app npx playwright test e2e/smoke.spec.ts   # smoke a deployment
 ```

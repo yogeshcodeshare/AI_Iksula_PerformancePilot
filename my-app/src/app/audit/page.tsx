@@ -162,7 +162,7 @@ export default function NewAudit() {
                   Environment <span style={{ color: 'var(--red-text)' }}>*</span>
                 </label>
                 <Select value={environment} onValueChange={setEnvironment}>
-                  <SelectTrigger className="h-10 bg-card border-border">
+                  <SelectTrigger aria-label="Environment" className="h-10 bg-card border-border">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -254,7 +254,7 @@ export default function NewAudit() {
                           <div className="flex-1">
                             <label className="block text-muted-foreground text-[11px] font-semibold uppercase tracking-[0.08em] mb-1.5">Page Type</label>
                             <Select value={page.pageType} onValueChange={(value) => updatePage(index, 'pageType', value)}>
-                              <SelectTrigger className="h-10 bg-card border-border">
+                              <SelectTrigger aria-label={`Page ${index + 1} type`} className="h-10 bg-card border-border">
                                 <SelectValue />
                               </SelectTrigger>
                               <SelectContent>
@@ -267,6 +267,8 @@ export default function NewAudit() {
                           <button
                             className="self-end mb-0.5 p-2 rounded-lg border-none bg-transparent cursor-pointer transition-colors text-muted-foreground/40 hover:text-[var(--red-text)] hover:bg-[var(--red-bg)] disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-muted-foreground/40"
                             onClick={() => removePage(index)}
+                            aria-label={`Remove page ${index + 1}`}
+                            title="Remove page"
                             disabled={pages.length === 1}
                           >
                             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5}><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>

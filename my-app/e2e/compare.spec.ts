@@ -36,7 +36,9 @@ test('Compare matches the same page typed differently and shows deltas', async (
 
   await expect(page.getByText('Baseline without slash')).toBeVisible();
   await expect(page.getByText(/Pages in baseline not in current/)).toHaveCount(0);
-  await expect(page.getByText('IMPROVED', { exact: true }).first()).toBeVisible();
+  // Before the Day 3 fix this showed "0 metrics compared"
+  await expect(page.getByText(/5 metrics compared/)).toBeVisible();
+  await expect(page.getByRole('tab', { name: /Improvements \(1\)/ })).toBeVisible();
 });
 
 test('Compare rejects a file that is not a report', async ({ page }) => {
