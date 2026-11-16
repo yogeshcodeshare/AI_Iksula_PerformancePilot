@@ -41,6 +41,23 @@ Decision: [D005](../decisions.md). Plan: Project Detailed Plan v1.3, section 8.
 "Iksula user" = authenticated and `auth.jwt() ->> 'email'` ends with `@iksula.com`.
 
 ## Login (Phase B)
-- Public sign-up OFF in Supabase Auth. Users are invited by an admin from the Supabase dashboard; each sets their own password.
-- A database trigger on `auth.users` rejects any email not ending in `@iksula.com` (defence in depth).
-- Removing a user: Supabase dashboard → Authentication → Users → delete. Their saved runs remain (owned by the deleted id) unless deleted explicitly.
+**Who:** Iksula QA team only. Guests keep full audit functionality without logging in.
+
+**How accounts are created:** public sign-up is OFF in Supabase Auth (Sign In / Providers). An admin invites each person from the Supabase dashboard (Authentication -> Users -> Add user -> Send invitation). There is no sign-up form in the app.
+
+**How people sign in (app page /login/):**
+1. Email + password (the password they chose from the invite link), or
+2. "Email me a sign-in link" (magic link). Uses signInWithOtp with shouldCreateUser: false, so it never creates accounts.
+3. "Forgot password" sends a reset email.
+
+**Invite / reset links** land on /account/ (Supabase reads the token from the URL), where the user sets or changes their password.
+
+**Domain rule (defence in depth):** a trigger on auth.users rejects any insert or email change to an address not ending in @iksula.com (migration ..._auth_iksula_only.sql). Read access to team data also requires an @iksula.com email (is_iksula_user()).
+
+**UI:** the navbar shows "Log in" (when Supabase is configured and nobody is signed in) or the user's email with a Sign out option. When Supabase is not configured, no login UI is shown at all.
+
+**Session:** stored in the browser (localStorage key pp-auth) by supabase-js and refreshed automatically. Signing out clears it.
+
+**Supabase URL settings (Authentication -> URL Configuration):** Site URL = https://sitevitals-ai.vercel.app ; Redirect URLs = https://sitevitals-ai.vercel.app/** , https://*-yogeshcodeshares-projects.vercel.app/** , http://localhost:3000/**
+
+**Adding / removing a user:** see docs/runbook.md "Team accounts".

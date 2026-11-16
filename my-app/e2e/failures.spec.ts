@@ -27,3 +27,10 @@ test('New Audit form blocks start when required fields are missing', async ({ pa
   await expect(page.getByText('Project name is required')).toBeVisible();
   await expect(page).toHaveURL(/\/audit\/?$/);
 });
+
+test('login page without Supabase config: no form, guests unaffected', async ({ page }) => {
+  await page.goto('/login/');
+  await expect(page.getByText('Login is not available on this deployment.')).toBeVisible();
+  await page.goto('/');
+  await expect(page.getByRole('link', { name: 'Team login' })).toHaveCount(0);
+});

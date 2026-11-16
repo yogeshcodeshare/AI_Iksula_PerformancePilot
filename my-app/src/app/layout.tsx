@@ -3,6 +3,7 @@ import { Inter, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Navbar } from "@/components/layout/Navbar";
+import { AuthProvider } from "@/lib/auth";
 
 const inter = Inter({
   variable: "--font-geist-sans",
@@ -33,12 +34,14 @@ export default function RootLayout({
         suppressHydrationWarning
       >
         <TooltipProvider>
-          <div className="flex min-h-screen flex-col">
-            <Navbar />
-            <main className="flex-1 bg-background">
-              {children}
-            </main>
-          </div>
+          <AuthProvider>
+            <div className="flex min-h-screen flex-col">
+              <Navbar />
+              <main className="flex-1 bg-background">
+                {children}
+              </main>
+            </div>
+          </AuthProvider>
         </TooltipProvider>
       </body>
     </html>
