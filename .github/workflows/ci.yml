@@ -16,7 +16,7 @@ defaults:
 jobs:
   test:
     name: Type check, unit tests, build, E2E
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04  # pinned: Playwright 1.54 does not support ubuntu 26.04 (ubuntu-latest) yet
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
