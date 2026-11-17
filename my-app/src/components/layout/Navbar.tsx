@@ -5,6 +5,24 @@ import { usePathname } from 'next/navigation';
 import { Settings } from 'lucide-react';
 import { useAuth } from '@/lib/auth';
 
+/** "Failures" link, only for logged-in Iksula QA. */
+function TeamNavLink({ isActive }: { isActive: boolean }) {
+    const { isTeamMember } = useAuth();
+    if (!isTeamMember) return null;
+    return (
+        <Link
+            href="/failures/"
+            className={`relative text-sm font-medium transition-colors py-1 ${
+                isActive
+                    ? 'text-foreground after:absolute after:bottom-[-2px] after:left-0 after:w-full after:h-[1.5px] after:bg-foreground'
+                    : 'text-muted-foreground hover:text-foreground'
+            }`}
+        >
+            Failures
+        </Link>
+    );
+}
+
 /** Log in / logged-in user. Renders nothing when login is not configured. */
 function AccountMenu() {
     const { enabled, ready, email, signOut } = useAuth();
@@ -52,7 +70,7 @@ export function Navbar() {
                         <Link
                             href="/"
                             className={`relative text-sm font-medium transition-colors py-1 ${
-                                isNavActive('/') && !isNavActive('/audit') && !isNavActive('/compare') && !isNavActive('/settings') && !isNavActive('/results') && !isNavActive('/about')
+                                isNavActive('/') && !isNavActive('/audit') && !isNavActive('/compare') && !isNavActive('/settings') && !isNavActive('/results') && !isNavActive('/about') && !isNavActive('/failures') && !isNavActive('/login') && !isNavActive('/account')
                                     ? 'text-foreground after:absolute after:bottom-[-2px] after:left-0 after:w-full after:h-[1.5px] after:bg-foreground'
                                     : 'text-muted-foreground hover:text-foreground'
                             }`}
@@ -79,6 +97,7 @@ export function Navbar() {
                         >
                             About
                         </Link>
+                        <TeamNavLink isActive={!!isNavActive('/failures')} />
                     </div>
                 </div>
 

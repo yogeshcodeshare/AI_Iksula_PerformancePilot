@@ -22,6 +22,7 @@ import {
   getSignificantCategoryChanges
 } from '@/services/comparison';
 import { getBaselineReportAsync, getAuditStateAsync, getAuditStateByRunId } from '@/services/storage';
+import { getRunReport, reportToState } from '@/services/runStore';
 import { formatMetricValue, formatDate, calculateOverallHealth, cn } from '@/lib/utils';
 import {
   TrendingUp,
@@ -54,15 +55,29 @@ export default function ComparePage() {
   const [selectedPage, setSelectedPage] = useState<string>('all');
 
   useEffect(() => {
-    getBaselineReportAsync().then(storedBaseline => {
+    const params = new URLSearchParams(window.location.search);
+    const baselineRunId = params.get('baseline');
+
+    async function loadBaseline() {
+      // Phase C: "Compare selected" on the dashboard passes ?baseline=<saved run id>
+      if (baselineRunId) {
+        const saved = await getRunReport(baselineRunId);
+        if (saved) return setBaseline(saved);
+      }
+      const storedBaseline = await getBaselineReportAsync();
       if (storedBaseline) setBaseline(storedBaseline);
-    });
+    }
+    loadBaseline();
 
     async function loadCurrent() {
       let currentAudit = null;
       // Prefer the exact run the user came from (/compare/?current=<runId>), see comparison-sop.md
-      const requestedRunId = new URLSearchParams(window.location.search).get('current');
+      const requestedRunId = params.get('current');
       if (requestedRunId) currentAudit = await getAuditStateByRunId(requestedRunId);
+      if (!currentAudit && requestedRunId) {
+        const saved = await getRunReport(requestedRunId);
+        if (saved) currentAudit = reportToState(saved);
+      }
       if (!currentAudit) {
         const sessionData = sessionStorage.getItem('current-audit-state');
         if (sessionData) {

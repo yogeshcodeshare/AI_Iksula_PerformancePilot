@@ -6,12 +6,24 @@ import { RecentAudit } from '@/services/storage';
 import { getRecentAudits, importReportPackage, saveBaselineReportAsync, getAuditStateByRunId } from '@/services/storage';
 import { formatDate, calculateOverallHealth } from '@/lib/utils';
 import { useRouter } from 'next/navigation';
+import { useAuth } from '@/lib/auth';
+import { SavedRuns } from '@/components/dashboard/SavedRuns';
+import { saveRun } from '@/services/runStore';
 
 export default function Dashboard() {
   const [recentAudits, setRecentAudits] = useState<RecentAudit[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const router = useRouter();
+  const { isTeamMember } = useAuth();
+  const [savedToAccount, setSavedToAccount] = useState<Record<string, 'saving' | 'saved' | 'failed'>>({});
+
+  const handleSaveToAccount = async (runId: string) => {
+    setSavedToAccount(s => ({ ...s, [runId]: 'saving' }));
+    const state = await getAuditStateByRunId(runId);
+    const ok = state ? await saveRun(state) : false;
+    setSavedToAccount(s => ({ ...s, [runId]: ok ? 'saved' : 'failed' }));
+  };
 
   useEffect(() => {
     const audits = getRecentAudits();
@@ -198,10 +210,13 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {/* Recent Audits */}
+        {/* Saved audits (logged-in Iksula QA) */}
+        <SavedRuns />
+
+        {/* Recent Audits (this browser) */}
         <div>
           <div className="flex items-center justify-between mb-5">
-            <h2 className="text-[22px] font-bold text-foreground tracking-[-0.02em]">Recent Audits</h2>
+            <h2 className="text-[22px] font-bold text-foreground tracking-[-0.02em]">{isTeamMember ? 'This browser' : 'Recent Audits'}</h2>
             <div className="flex items-center gap-3">
               <div className="relative">
                 <svg className="absolute left-2.5 top-1/2 -translate-y-1/2" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} style={{ color: 'var(--ring)' }}><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
@@ -272,8 +287,19 @@ export default function Dashboard() {
                         </td>
                         <td className="px-5 py-4 font-mono text-muted-foreground text-xs">{audit.pageCount || 0} pages</td>
                         <td className="px-5 py-4 text-muted-foreground text-xs">{audit.generatedAt ? formatDate(audit.generatedAt) : 'N/A'}</td>
-                        <td className="px-5 py-4 text-right">
+                        <td className="px-5 py-4 text-right whitespace-nowrap">
+                          {isTeamMember && (
+                            <button
+                              type="button"
+                              disabled={savedToAccount[audit.runId] === 'saving' || savedToAccount[audit.runId] === 'saved'}
+                              className="mr-2 text-xs px-2 py-1 rounded-md border border-border bg-transparent text-muted-foreground hover:text-foreground cursor-pointer disabled:cursor-default"
+                              onClick={(e) => { e.stopPropagation(); void handleSaveToAccount(audit.runId); }}
+                            >
+                              {savedToAccount[audit.runId] === 'saved' ? 'Saved ✓' : savedToAccount[audit.runId] === 'saving' ? 'Saving…' : savedToAccount[audit.runId] === 'failed' ? 'Retry save' : 'Save to my account'}
+                            </button>
+                          )}
                           <button
+                            aria-label={`Open ${audit.projectName || 'audit'} results`}
                             className="p-1.5 rounded-md border border-border bg-transparent text-muted-foreground hover:bg-muted hover:text-foreground transition-colors cursor-pointer"
                             onClick={(e) => { e.stopPropagation(); handleViewResults(audit.runId); }}
                           >

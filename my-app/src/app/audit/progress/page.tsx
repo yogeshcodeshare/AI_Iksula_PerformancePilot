@@ -14,6 +14,7 @@ import {
 import Link from 'next/link';
 import { buildFailureIssueUrl } from '@/lib/issueReport';
 import { logFailures } from '@/services/errorLog';
+import { saveRun } from '@/services/runStore';
 import { APP_VERSION } from '@/lib/constants';
 
 interface PageProgress {
@@ -188,6 +189,8 @@ export default function AuditProgressPage() {
     };
     await saveAuditStateAsync(state);
     lastSavedStateRef.current = state;
+    // Logged-in Iksula QA: also save to the team database (background; no-op for guests)
+    void saveRun(state);
     try {
       sessionStorage.setItem('current-audit-state', JSON.stringify(state));
     } catch {
