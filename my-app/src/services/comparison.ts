@@ -11,9 +11,13 @@ import {
   CategoryName,
   CWVAssessment,
   AuditPage,
-  MetricSource
+  MetricSource,
+  ComparedMetricName,
+  LabMetricName,
+  DiagnosticItem
 } from '@/types';
 import { formatMetricValue } from '@/lib/utils';
+import { RECOMMENDATION_MAP } from './recommendations';
 
 const TRACKING_PARAMS = /^(utm_.*|gclid|fbclid|msclkid|mc_cid|mc_eid)$/i;
 
@@ -147,9 +151,49 @@ function comparePageMetrics(
         deltas.push(delta);
       }
     }
+    // Lab-only metrics (Lighthouse): Total Blocking Time and Speed Index
+    for (const name of Object.keys(LAB_METRIC_AUDITS) as LabMetricName[]) {
+      const b = labMetric(baseline.diagnostics, baselinePageId, device, name);
+      const c = labMetric(current.diagnostics, currentPageId, device, name);
+      if (b && c) deltas.push(calculateDelta(b, c, pageLabel));
+    }
   }
   
   return deltas;
+}
+
+/** Lighthouse audit id for each lab-only metric. */
+export const LAB_METRIC_AUDITS: Record<LabMetricName, string> = {
+  TBT: 'total-blocking-time',
+  SI: 'speed-index',
+};
+
+/**
+ * Build a MetricResult for a lab-only metric from the Lighthouse diagnostic
+ * item (numericValue in ms). Status follows the Lighthouse score
+ * (>=90 good, >=50 needs improvement, else poor). Never invents a value.
+ */
+export function labMetric(
+  diagnostics: DiagnosticItem[] | undefined,
+  pageId: string,
+  device: Device,
+  name: LabMetricName,
+): MetricResult | null {
+  const d = diagnostics?.find(x => x.pageId === pageId && x.device === device && x.auditKey === LAB_METRIC_AUDITS[name]);
+  if (!d || typeof d.numericValue !== 'number') return null;
+  const score = d.score ?? 0;
+  return {
+    pageId, device,
+    metricName: name as unknown as MetricName,
+    value: d.numericValue,
+    unit: 'ms',
+    thresholdGood: 0, thresholdWarn: 0,
+    status: score >= 90 ? 'good' : score >= 50 ? 'needs-improvement' : 'poor',
+    sourceAttempted: d.source, sourceUsed: d.source,
+    fallbackTriggered: true,
+    fallbackReason: 'Lab (Lighthouse)',
+    capturedAt: d.capturedAt,
+  };
 }
 
 function compareCategoryScores(
@@ -184,12 +228,14 @@ function compareCategoryScores(
 }
 
 // Minimum absolute thresholds to avoid false positives on near-zero values
-function getMinThreshold(metricName: MetricName): number {
+function getMinThreshold(metricName: ComparedMetricName): number {
   switch (metricName) {
     case 'CLS': return 0.01;
     case 'INP': return 10;
     case 'LCP': case 'FCP': case 'TTFB': return 50;
     case 'performance_score': return 1;
+    case 'TBT': return 50;
+    case 'SI': return 100;
     default: return 0;
   }
 }
@@ -208,7 +254,7 @@ function calculateDelta(
     deltaDirection = 'unchanged';
   } else {
     // Use 10% of baseline OR a minimum absolute threshold, whichever is larger
-    const threshold = Math.max(baseline.value * 0.1, getMinThreshold(baseline.metricName));
+    const threshold = Math.max(baseline.value * 0.1, getMinThreshold(baseline.metricName as ComparedMetricName));
 
     if (Math.abs(deltaValue) < threshold) {
       deltaDirection = 'unchanged';
@@ -223,7 +269,7 @@ function calculateDelta(
     baselineRunId: baseline.pageId,
     currentRunId: current.pageId,
     pageKey: pageLabel,
-    metricName: current.metricName,
+    metricName: current.metricName as ComparedMetricName,
     device: current.device,
     baselineValue: baseline.value,
     currentValue: current.value,
@@ -454,4 +500,54 @@ export function buildComparisonInsights(
     counts: { compared: deltas.length, improved: improved.length, regressed: regressed.length, unchanged: deltas.length - improved.length - regressed.length },
     biggestImprovement, biggestRegression, statusChanges, cwv, sources, summary: parts.join(' '),
   };
+}
+
+// ── Item 10: likely cause + fix for each regression ──────────────────────────
+
+/** Lighthouse audits that commonly drive each metric (most impactful first). */
+export const METRIC_RELATED_AUDITS: Record<ComparedMetricName, string[]> = {
+  LCP: ['render-blocking-resources', 'server-response-time', 'largest-contentful-paint-element', 'modern-image-formats', 'uses-responsive-images', 'offscreen-images', 'unused-javascript', 'unused-css-rules', 'total-byte-weight'],
+  FCP: ['render-blocking-resources', 'server-response-time', 'unused-css-rules', 'font-display', 'redirects'],
+  TTFB: ['server-response-time', 'redirects'],
+  INP: ['unused-javascript', 'legacy-javascript', 'bootup-time', 'mainthread-work-breakdown', 'unminified-javascript'],
+  TBT: ['unused-javascript', 'legacy-javascript', 'bootup-time', 'mainthread-work-breakdown', 'unminified-javascript'],
+  CLS: ['layout-shifts', 'unsized-images', 'font-display'],
+  SI: ['render-blocking-resources', 'font-display', 'unused-css-rules', 'server-response-time'],
+  performance_score: ['render-blocking-resources', 'unused-javascript', 'server-response-time'],
+};
+
+export interface RegressionCause {
+  delta: ComparisonDelta;
+  auditKey: string;
+  title: string;
+  displayValue?: string;
+  fix: string;
+  owner?: string;
+}
+
+/**
+ * For each regression, the first failing/warning Lighthouse audit (in the
+ * CURRENT run, same page + device) related to that metric. Guidance comes from
+ * the static recommendation map, falling back to the audit's own title.
+ * Regressions with no related failing audit are omitted (nothing is invented).
+ */
+export function explainRegressions(regressions: ComparisonDelta[], current: ReportPackage): RegressionCause[] {
+  const out: RegressionCause[] = [];
+  for (const r of regressions) {
+    const keys = METRIC_RELATED_AUDITS[r.metricName] ?? [];
+    const issues = (current.diagnostics ?? []).filter(d =>
+      d.pageId === r.currentRunId && d.device === r.device && (d.status === 'fail' || d.status === 'warning'));
+    for (const key of keys) {
+      const d = issues.find(x => x.auditKey === key);
+      if (!d) continue;
+      const rec = RECOMMENDATION_MAP[key];
+      out.push({
+        delta: r, auditKey: key, title: d.title, displayValue: d.displayValue,
+        fix: rec?.recommendation ?? d.recommendation ?? `See Lighthouse audit "${d.title}".`,
+        owner: rec?.suggestedOwner ?? d.suggestedOwner,
+      });
+      break;
+    }
+  }
+  return out;
 }

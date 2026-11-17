@@ -36,8 +36,12 @@ export function formatMetricValue(value: number, metric: MetricName | string): s
     return `${Math.round(value)} ms`;
   }
 
-  if (metric === 'INP') {
+  if (metric === 'INP' || metric === 'TBT') {
     return `${Math.round(value)} ms`;
+  }
+
+  if (metric === 'SI') {
+    return `${(value / 1000).toFixed(1)} s`;
   }
 
   if (metric === 'CLS') {

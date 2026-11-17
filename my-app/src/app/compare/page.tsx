@@ -18,6 +18,7 @@ import { ReportPackage, ComparisonResult, ComparisonDelta, CategoryScoreDelta, C
 import {
   compareReports,
   generateComparisonSummary,
+  explainRegressions,
   getSignificantChanges,
   getSignificantCategoryChanges
 } from '@/services/comparison';
@@ -25,6 +26,8 @@ import { getBaselineReportAsync, getAuditStateAsync, getAuditStateByRunId } from
 import { getRunReport, reportToState } from '@/services/runStore';
 import { buildComparisonInsights, SOURCE_LABEL, STATUS_LABEL } from '@/services/comparison';
 import { ComparisonSummary } from '@/components/compare/ComparisonSummary';
+import { RegressionCauses } from '@/components/compare/RegressionCauses';
+import { BeforeAfterChart, CHART_ORDER } from '@/components/compare/BeforeAfterChart';
 import { formatMetricValue, formatDate, calculateOverallHealth, cn } from '@/lib/utils';
 import {
   TrendingUp,
@@ -184,6 +187,10 @@ export default function ComparePage() {
   const summary = generateComparisonSummary(filteredComparison);
   const regressions = getSignificantChanges(filteredComparison, 'regressed');
   const improvements = getSignificantChanges(filteredComparison, 'improved');
+  const regressionCauses = explainRegressions(regressions, current);
+  // Chart: selected page, or the first page when "All pages" is selected
+  const chartPageKey = selectedPage !== 'all' ? selectedPage : filteredComparison.deltas[0]?.pageKey;
+  const chartDeltas = filteredComparison.deltas.filter(d => d.pageKey === chartPageKey);
   const categoryRegressions = getSignificantCategoryChanges(filteredComparison, 'regressed');
   const categoryImprovements = getSignificantCategoryChanges(filteredComparison, 'improved');
 
@@ -194,6 +201,9 @@ export default function ComparePage() {
     current.metrics.filter(m => m.device === selectedDevice && (!selectedPageIds || selectedPageIds.current.includes(m.pageId)))
   );
   const healthDelta = currentHealth - baselineHealth;
+  // Overall (mobile + desktop, all pages) change for the PDF header, so it
+  // does not depend on the device toggle on screen.
+  const overallHealthDelta = calculateOverallHealth(current.metrics) - calculateOverallHealth(baseline.metrics);
 
   const handleDownloadComparisonPDF = () => {
     const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
@@ -223,10 +233,12 @@ export default function ComparePage() {
     // Health delta box
     filledRect(W - 62, 10, 47, 35, 30, 41, 59);
     setFont(7, 'bold', [148, 163, 184]);
-    doc.text('HEALTH CHANGE', W - 38, 19, { align: 'center' });
-    const deltaColor: [number, number, number] = healthDelta > 0 ? [74, 222, 128] : healthDelta < 0 ? [248, 113, 113] : [148, 163, 184];
+    doc.text('OVERALL HEALTH', W - 38, 17, { align: 'center' });
+    setFont(6, 'normal', [148, 163, 184]);
+    doc.text('mobile + desktop', W - 38, 21, { align: 'center' });
+    const deltaColor: [number, number, number] = overallHealthDelta > 0 ? [74, 222, 128] : overallHealthDelta < 0 ? [248, 113, 113] : [148, 163, 184];
     setFont(20, 'bold', deltaColor);
-    doc.text(`${healthDelta > 0 ? '+' : ''}${healthDelta}%`, W - 38, 34, { align: 'center' });
+    doc.text(`${overallHealthDelta > 0 ? '+' : ''}${overallHealthDelta}%`, W - 38, 34, { align: 'center' });
 
     let y = 70;
 
@@ -323,7 +335,7 @@ export default function ComparePage() {
       doc.text(`${device.toUpperCase()} RESULTS`, MARGIN + 4, y + 7);
       const devHealthColor: [number, number, number] = devHealthDelta > 0 ? [74, 222, 128] : devHealthDelta < 0 ? [248, 113, 113] : [200, 200, 200];
       setFont(8, 'bold', devHealthColor);
-      doc.text(`Health: ${devCurrentHealth}% (${devHealthDelta > 0 ? '+' : ''}${devHealthDelta}%)`, CONTENT_W - 10, y + 7, { align: 'right' });
+      doc.text(`${device === 'mobile' ? 'Mobile' : 'Desktop'} health: ${devBaselineHealth}% -> ${devCurrentHealth}% (${devHealthDelta > 0 ? '+' : ''}${devHealthDelta}%)`, CONTENT_W - 10, y + 7, { align: 'right' });
       y += 16;
 
       // Summary stats row
@@ -444,6 +456,67 @@ export default function ComparePage() {
         y = (doc as unknown as AutoTableDoc).lastAutoTable.finalY + 8;
       }
 
+      // Before vs after chart (one row of bars per page, max 6 pages)
+      const chartPages = [...new Set(devDeltas.map(d => d.pageKey))].slice(0, 6);
+      if (chartPages.length > 0) {
+        if (y > 230) { doc.addPage(); y = 20; }
+        setFont(9, 'bold', [15, 23, 42]);
+        doc.text('Before vs after (lower is better; top bar = baseline, bottom = current)', MARGIN, y);
+        y += 5;
+        const colW = CONTENT_W / CHART_ORDER.length;
+        const statusRgb = (s?: string): [number, number, number] =>
+          s === 'good' ? [22, 163, 74] : s === 'needs-improvement' ? [217, 119, 6] : s === 'poor' ? [220, 38, 38] : [148, 163, 184];
+        for (const pk of chartPages) {
+          if (y > 262) { doc.addPage(); y = 20; }
+          setFont(7, 'bold', [51, 65, 85]);
+          doc.text(pk, MARGIN, y);
+          y += 2;
+          CHART_ORDER.forEach((m, i) => {
+            const d = devDeltas.find(x => x.pageKey === pk && x.metricName === m);
+            const x0 = MARGIN + i * colW;
+            setFont(6, 'bold', [71, 85, 105]);
+            doc.text(m, x0, y + 3);
+            if (!d) { setFont(6, 'normal', [148, 163, 184]); doc.text('n/a', x0, y + 8); return; }
+            const max = Math.max(d.baselineValue, d.currentValue) || 1;
+            const bw = colW - 4;
+            ([[d.baselineValue, d.baselineStatus], [d.currentValue, d.currentStatus]] as const).forEach(([v, s], k) => {
+              const by = y + 5 + k * 6;
+              const [r, g, b] = statusRgb(s);
+              doc.setFillColor(r, g, b);
+              doc.rect(x0, by, Math.max(1, (v / max) * bw), 2.5, 'F');
+              setFont(5, 'normal', [71, 85, 105]);
+              doc.text(formatMetricValue(v, d.metricName), x0, by + 5);
+            });
+          });
+          y += 19;
+        }
+        y += 3;
+      }
+
+      // Why it got worse & what to fix
+      const devCauses = explainRegressions(devRegressions, current);
+      if (devCauses.length > 0) {
+        if (y > 230) { doc.addPage(); y = 20; }
+        setFont(9, 'bold', [15, 23, 42]);
+        doc.text('Why it got worse & what to fix', MARGIN, y);
+        y += 4;
+        autoTable(doc, {
+          startY: y,
+          margin: { left: MARGIN, right: MARGIN },
+          head: [['Regression', 'Likely cause (Lighthouse)', 'Fix', 'Owner']],
+          body: devCauses.map(c => [
+            `${c.delta.metricName} - ${c.delta.pageKey}: ${formatMetricValue(c.delta.baselineValue, c.delta.metricName)} -> ${formatMetricValue(c.delta.currentValue, c.delta.metricName)}`,
+            `${c.title}${c.displayValue ? ` (${c.displayValue})` : ''}`,
+            c.fix,
+            c.owner ?? '',
+          ]),
+          headStyles: { fillColor: [15, 23, 42], fontSize: 8, fontStyle: 'bold' },
+          bodyStyles: { fontSize: 7.5, cellPadding: 2.5, valign: 'middle', lineWidth: 0.2, lineColor: [226, 232, 240] },
+          columnStyles: { 0: { cellWidth: 45, fontStyle: 'bold' }, 3: { cellWidth: 18 } },
+        });
+        y = (doc as unknown as AutoTableDoc).lastAutoTable.finalY + 8;
+      }
+
       // Page break between mobile and desktop
       if (device === 'mobile') { doc.addPage(); y = 20; }
     }
@@ -526,7 +599,7 @@ export default function ComparePage() {
               <div className="font-mono text-[22px] font-bold" style={{ color: healthDelta > 0 ? 'var(--green-text)' : healthDelta < 0 ? 'var(--red-text)' : 'var(--foreground)' }}>
                 {healthDelta > 0 ? '+' : ''}{healthDelta}%
               </div>
-              <div className="text-[10px] uppercase tracking-[0.08em] mt-1" style={{ color: 'var(--ring)' }}>Health Delta</div>
+              <div className="text-[10px] uppercase tracking-[0.08em] mt-1" style={{ color: 'var(--ring)' }}>{selectedDevice === 'mobile' ? 'Mobile' : 'Desktop'} health ({baselineHealth}% &rarr; {currentHealth}%)</div>
             </div>
           </div>
           <div className="double-bezel">
@@ -565,6 +638,10 @@ export default function ComparePage() {
         </div>
 
         {insights && <ComparisonSummary insights={insights} />}
+
+        {chartPageKey && <BeforeAfterChart deltas={chartDeltas} pageKey={chartPageKey} device={selectedDevice} />}
+
+        <RegressionCauses causes={regressionCauses} />
 
         {/* Category score summary */}
         {summary.categoryScoresCompared > 0 && (
