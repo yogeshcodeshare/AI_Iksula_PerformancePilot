@@ -10,8 +10,10 @@ import {
   CategoryScoreDelta,
   CategoryName,
   CWVAssessment,
-  AuditPage
+  AuditPage,
+  MetricSource
 } from '@/types';
+import { formatMetricValue } from '@/lib/utils';
 
 const TRACKING_PARAMS = /^(utm_.*|gclid|fbclid|msclkid|mc_cid|mc_eid)$/i;
 
@@ -93,7 +95,7 @@ export function compareReports(
       baselinePage.pageId,
       currentPage.pageId,
       baselinePage.pageLabel
-    );
+    ).map(d => ({ ...d, pageUrl: currentPage.url }));
     
     deltas.push(...pageDeltas);
     
@@ -226,8 +228,21 @@ function calculateDelta(
     baselineValue: baseline.value,
     currentValue: current.value,
     deltaValue: Math.abs(deltaValue),
-    deltaDirection
+    deltaDirection,
+    baselineStatus: baseline.status,
+    currentStatus: current.status,
+    baselineSource: metricSource(baseline),
+    currentSource: metricSource(current),
+    percentChange: baseline.value !== 0 ? Math.round((deltaValue / baseline.value) * 1000) / 10 : null,
   };
+}
+
+/** Where a metric value came from (see extractMetrics in audit.ts). */
+export function metricSource(m: MetricResult): MetricSource {
+  const reason = (m.fallbackReason || '').toLowerCase();
+  if (reason.includes('origin')) return 'field-origin';
+  if (!m.fallbackTriggered && (reason.includes('crux') || reason.includes('real users') || reason === '')) return 'field-url';
+  return 'lab';
 }
 
 function calculateCategoryScoreDelta(
@@ -346,4 +361,97 @@ export function compareCWVAssessments(
   }
   
   return results;
+}
+
+// ---------------------------------------------------------------------------
+// Comparison insights (summary, status changes, CWV pass/fail, data source)
+// ---------------------------------------------------------------------------
+
+export type CwvVerdict = 'passed' | 'failed' | 'n/a';
+
+export interface ComparisonInsights {
+  counts: { compared: number; improved: number; regressed: number; unchanged: number };
+  biggestImprovement: ComparisonDelta | null;
+  biggestRegression: ComparisonDelta | null;
+  /** Metrics that moved between Good / Needs improvement / Poor. */
+  statusChanges: Array<ComparisonDelta & { better: boolean }>;
+  /** Run-level Core Web Vitals verdict per device (all compared pages must pass). */
+  cwv: Record<Device, { baseline: CwvVerdict; current: CwvVerdict }>;
+  /** How many compared values came from real users vs a lab test, per run. */
+  sources: { baseline: Record<MetricSource, number>; current: Record<MetricSource, number> };
+  /** One-paragraph plain-English summary. */
+  summary: string;
+}
+
+const STATUS_RANK: Record<string, number> = { good: 0, 'needs-improvement': 1, poor: 2 };
+export const STATUS_LABEL: Record<string, string> = { good: 'Good', 'needs-improvement': 'Needs improvement', poor: 'Poor' };
+export const SOURCE_LABEL: Record<MetricSource, string> = {
+  'field-url': 'Real users (this page)', 'field-origin': 'Real users (whole site)', lab: 'Lab test',
+};
+
+function runVerdict(pkg: ReportPackage, pageIds: Set<string>, device: Device): CwvVerdict {
+  const rows = (pkg.cwvAssessments ?? []).filter(a => pageIds.has(a.pageId) && a.device === device);
+  if (rows.length === 0 || rows.every(r => r.status === 'not-available')) return 'n/a';
+  return rows.every(r => r.passed) ? 'passed' : 'failed';
+}
+
+function fmtDelta(d: ComparisonDelta): string {
+  const sign = d.deltaDirection === 'improved' ? '-' : '+';
+  const pct = d.percentChange != null ? ` (${d.percentChange > 0 ? '+' : ''}${d.percentChange}%)` : '';
+  return `${d.metricName} ${sign}${formatMetricValue(d.deltaValue, d.metricName)}${pct} on ${d.pageKey} (${d.device})`;
+}
+
+export function buildComparisonInsights(
+  comparison: ComparisonResult,
+  baseline: ReportPackage,
+  current: ReportPackage,
+): ComparisonInsights {
+  const deltas = comparison.deltas;
+  const improved = deltas.filter(d => d.deltaDirection === 'improved');
+  const regressed = deltas.filter(d => d.deltaDirection === 'regressed');
+  const byPct = (a: ComparisonDelta, b: ComparisonDelta) => Math.abs(b.percentChange ?? 0) - Math.abs(a.percentChange ?? 0);
+
+  const statusChanges = deltas
+    .filter(d => d.baselineStatus && d.currentStatus && d.baselineStatus !== d.currentStatus)
+    .map(d => ({ ...d, better: STATUS_RANK[d.currentStatus!] < STATUS_RANK[d.baselineStatus!] }));
+
+  const { pairs } = matchPages(baseline.pages, current.pages);
+  const baseIds = new Set(pairs.map(([b]) => b.pageId));
+  const curIds = new Set(pairs.map(([, c]) => c.pageId));
+  const cwv = {
+    mobile: { baseline: runVerdict(baseline, baseIds, 'mobile'), current: runVerdict(current, curIds, 'mobile') },
+    desktop: { baseline: runVerdict(baseline, baseIds, 'desktop'), current: runVerdict(current, curIds, 'desktop') },
+  };
+
+  const empty = (): Record<MetricSource, number> => ({ 'field-url': 0, 'field-origin': 0, lab: 0 });
+  const sources = { baseline: empty(), current: empty() };
+  for (const d of deltas) {
+    if (d.baselineSource) sources.baseline[d.baselineSource]++;
+    if (d.currentSource) sources.current[d.currentSource]++;
+  }
+
+  const biggestImprovement = [...improved].sort(byPct)[0] ?? null;
+  const biggestRegression = [...regressed].sort(byPct)[0] ?? null;
+
+  const parts: string[] = [];
+  if (deltas.length === 0) {
+    parts.push('No pages could be matched between the two runs, so nothing was compared.');
+  } else {
+    parts.push(`${deltas.length} measurements compared: ${improved.length} improved, ${regressed.length} got worse, ${deltas.length - improved.length - regressed.length} unchanged.`);
+    if (biggestImprovement) parts.push(`Biggest improvement: ${fmtDelta(biggestImprovement)}.`);
+    if (biggestRegression) parts.push(`Biggest problem: ${fmtDelta(biggestRegression)}.`);
+    const flips = (['mobile', 'desktop'] as Device[])
+      .filter(dev => cwv[dev].baseline !== 'n/a' && cwv[dev].current !== 'n/a' && cwv[dev].baseline !== cwv[dev].current)
+      .map(dev => `${dev} Core Web Vitals ${cwv[dev].baseline} \u2192 ${cwv[dev].current}`);
+    if (flips.length) parts.push(`Change in Google's pass/fail: ${flips.join('; ')}.`);
+    const fieldShare = (sources.current['field-url'] + sources.current['field-origin']) / Math.max(1, deltas.length);
+    if (fieldShare > 0.5 && regressed.length === 0 && improved.length === 0) {
+      parts.push('Most values are real-user data averaged over 28 days, which changes slowly; a deploy may take days to show.');
+    }
+  }
+
+  return {
+    counts: { compared: deltas.length, improved: improved.length, regressed: regressed.length, unchanged: deltas.length - improved.length - regressed.length },
+    biggestImprovement, biggestRegression, statusChanges, cwv, sources, summary: parts.join(' '),
+  };
 }
