@@ -139,3 +139,58 @@ describe('compareReports – page type changed between runs', () => {
     expect(r.newPages).toEqual([]);
   });
 });
+
+describe('comparison insights (Nov 2026 report improvements)', () => {
+  // Late import keeps the earlier tests' import list unchanged
+  const load = () => import('./comparison');
+
+  it('rows carry URL, status before/after, data source and % change', async () => {
+    const { compareReports: cmp } = await load();
+    const base = makeReport('A', [{ url: 'https://shop.test/', metrics: { LCP: 4200 } }]);
+    const cur = makeReport('B', [{ url: 'https://shop.test/', metrics: { LCP: 3000 } }]);
+    const lcp = cmp(base, cur).deltas.find(d => d.metricName === 'LCP' && d.device === 'mobile')!;
+    expect(lcp).toMatchObject({ pageUrl: 'https://shop.test/', baselineStatus: 'poor', currentStatus: 'needs-improvement', currentSource: 'field-url', percentChange: -28.6 });
+  });
+
+  it('builds the summary: counts, biggest win/problem and threshold crossings', async () => {
+    const { compareReports: cmp, buildComparisonInsights } = await load();
+    const base = makeReport('A', [{ url: 'https://shop.test/', metrics: { LCP: 4200, CLS: 5 } }]);
+    const cur = makeReport('B', [{ url: 'https://shop.test/', metrics: { LCP: 2400, CLS: 30 } }]);
+    const r = cmp(base, cur);
+    const ins = buildComparisonInsights(r, base, cur);
+    expect(ins.counts.improved).toBe(2);
+    expect(ins.counts.regressed).toBe(2);
+    expect(ins.biggestImprovement?.metricName).toBe('LCP');
+    expect(ins.biggestRegression?.metricName).toBe('CLS');
+    expect(ins.statusChanges.find(s => s.metricName === 'LCP' && s.device === 'mobile')).toMatchObject({ baselineStatus: 'poor', currentStatus: 'good', better: true });
+    expect(ins.summary).toMatch(/Biggest improvement: LCP/);
+    expect(ins.summary).toMatch(/Biggest problem: CLS/);
+  });
+
+  it('reports Core Web Vitals pass/fail per device and flags a flip', async () => {
+    const { compareReports: cmp, buildComparisonInsights } = await load();
+    const base = makeReport('A', [{ url: 'https://shop.test/' }]);
+    const cur = makeReport('B', [{ url: 'https://shop.test/' }]);
+    base.cwvAssessments = base.pages.flatMap(p => (['mobile', 'desktop'] as const).map(device => ({ pageId: p.pageId, device, passed: false, status: 'failed' }))) as never;
+    cur.cwvAssessments = cur.pages.flatMap(p => (['mobile', 'desktop'] as const).map(device => ({ pageId: p.pageId, device, passed: device === 'mobile', status: device === 'mobile' ? 'passed' : 'failed' }))) as never;
+    const ins = buildComparisonInsights(cmp(base, cur), base, cur);
+    expect(ins.cwv.mobile).toEqual({ baseline: 'failed', current: 'passed' });
+    expect(ins.cwv.desktop).toEqual({ baseline: 'failed', current: 'failed' });
+    expect(ins.summary).toMatch(/mobile Core Web Vitals failed → passed/);
+  });
+
+  it('explains slow-moving real-user data when nothing changed', async () => {
+    const { compareReports: cmp, buildComparisonInsights } = await load();
+    const base = makeReport('A', [{ url: 'https://shop.test/' }]);
+    const cur = makeReport('B', [{ url: 'https://shop.test/' }]);
+    expect(buildComparisonInsights(cmp(base, cur), base, cur).summary).toMatch(/28 days/);
+  });
+
+  it('metricSource tells real-user (page / site) from lab data', async () => {
+    const { metricSource } = await load();
+    const m = (fallbackTriggered: boolean, fallbackReason?: string) => ({ fallbackTriggered, fallbackReason }) as never;
+    expect(metricSource(m(false, 'Using CrUX Field Data (real users)'))).toBe('field-url');
+    expect(metricSource(m(true, 'URL-level CrUX unavailable, using origin-level data'))).toBe('field-origin');
+    expect(metricSource(m(true, 'No CrUX field data available for this URL'))).toBe('lab');
+  });
+});

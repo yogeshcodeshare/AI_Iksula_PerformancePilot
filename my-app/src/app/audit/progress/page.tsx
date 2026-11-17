@@ -15,6 +15,8 @@ import Link from 'next/link';
 import { buildFailureIssueUrl } from '@/lib/issueReport';
 import { logFailures } from '@/services/errorLog';
 import { saveRun } from '@/services/runStore';
+import { guideFor } from '@/lib/errorGuide';
+import { ErrorGuide } from '@/components/ErrorGuide';
 import { APP_VERSION } from '@/lib/constants';
 
 interface PageProgress {
@@ -52,15 +54,17 @@ const ERROR_CODE_LABELS: Record<AuditErrorCode, { short: string; description: st
 
 function ErrorCodeChip({ code }: { code?: string }) {
   if (!code) return null;
-  const label = ERROR_CODE_LABELS[code as AuditErrorCode]?.short ?? code;
+  const g = guideFor(code);
+  const label = g?.label ?? ERROR_CODE_LABELS[code as AuditErrorCode]?.short ?? code;
   return (
-    <span
-      className="inline-flex items-center text-[10px] font-mono uppercase tracking-wider mt-0.5 px-1.5 py-0.5 rounded"
+    <a
+      href={`#error-${code}`}
+      className="inline-flex items-center text-[10px] font-mono uppercase tracking-wider mt-0.5 px-1.5 py-0.5 rounded no-underline"
       style={{ background: 'var(--red-bg)', color: 'var(--red-text)' }}
-      title={ERROR_CODE_LABELS[code as AuditErrorCode]?.description}
+      title={g ? `${g.meaning} ${g.action}` : ERROR_CODE_LABELS[code as AuditErrorCode]?.description}
     >
       {label}
-    </span>
+    </a>
   );
 }
 
@@ -580,6 +584,18 @@ export default function AuditProgressPage() {
             </tbody>
           </table>
         </div>
+
+        {/* Plain-English explanation of the error types in this run */}
+        {status !== 'running' && (
+          <div className="mb-6 -mt-2">
+            <ErrorGuide
+              codes={pageProgress.flatMap(p => [
+                p.mobile === 'failed' || p.mobile === 'timeout' ? p.mobileErrorCode : undefined,
+                p.desktop === 'failed' || p.desktop === 'timeout' ? p.desktopErrorCode : undefined,
+              ])}
+            />
+          </div>
+        )}
 
         {/* Info Cards */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

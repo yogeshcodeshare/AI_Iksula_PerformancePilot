@@ -154,6 +154,14 @@ describe('runAudit', () => {
     expect(r.pageFailures.every(f => f.errorCode === 'quota-exhausted')).toBe(true);
   });
 
+  it('a new audit of the same URL measures fresh (no result reused from an earlier run)', async () => {
+    const same = u('rerun');
+    mockPsi(url => jsonResponse(200, psiResponse({ url, field: WEBDEV_FIELD })));
+    await run([same]);
+    await run([same]);
+    expect(calls.filter(c => c.url === same)).toHaveLength(4); // 2 devices x 2 runs
+  });
+
   it('preflight always calls Google (never served from the hourly cache)', async () => {
     mockPsi(url => jsonResponse(200, psiResponse({ url, field: WEBDEV_FIELD })));
     await run([u('a')]);

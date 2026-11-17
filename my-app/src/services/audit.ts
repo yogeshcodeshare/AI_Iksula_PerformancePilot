@@ -523,8 +523,8 @@ export function classifyFetchError(error: unknown): { code: AuditErrorCode; mess
 
 /**
  * In-memory PSI response cache, keyed by url+strategy+hourBucket.
- * PSI results don't change minute-to-minute — caching for the audit lifetime is safe
- * and saves real quota when users re-run audits of the same URLs.
+ * Cleared at the start of every runAudit(), so it only serves repeats WITHIN a
+ * run (e.g. retries). A new audit always measures fresh.
  * NOTE: deliberately in-memory only — IndexedDB cache would interact with the existing
  * saveAuditStateAsync flow in ways that need separate thought.
  */
@@ -1844,6 +1844,12 @@ export async function runAudit(
 
   // Reset throttle timestamp for each new audit
   lastCallTimestamp = 0;
+
+  // Every NEW audit measures fresh (2026-11, owner test): reusing the hourly
+  // cache made a re-test minutes after a deploy return the previous result,
+  // so the comparison showed a misleading "Unchanged". The cache still helps
+  // within one run (second pass / manual retry of the same URLs).
+  psiCache.clear();
 
   // === Preflight check ===
   // Hits PSI with google.com (10s timeout). If the key is referer-blocked / has no

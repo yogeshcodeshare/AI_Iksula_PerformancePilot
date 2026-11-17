@@ -23,6 +23,8 @@ import {
 } from '@/services/comparison';
 import { getBaselineReportAsync, getAuditStateAsync, getAuditStateByRunId } from '@/services/storage';
 import { getRunReport, reportToState } from '@/services/runStore';
+import { buildComparisonInsights, SOURCE_LABEL, STATUS_LABEL } from '@/services/comparison';
+import { ComparisonSummary } from '@/components/compare/ComparisonSummary';
 import { formatMetricValue, formatDate, calculateOverallHealth, cn } from '@/lib/utils';
 import {
   TrendingUp,
@@ -142,6 +144,11 @@ export default function ComparePage() {
     return { baseline: baselinePageIds, current: currentPageIds };
   }, [selectedPage, baseline, current]);
 
+  const insights = useMemo(
+    () => (comparison && baseline && current ? buildComparisonInsights(comparison, baseline, current) : null),
+    [comparison, baseline, current],
+  );
+
   if (!baseline || !current) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
@@ -233,9 +240,69 @@ export default function ComparePage() {
     doc.text(comparison.baselineRun.auditLabel, MARGIN + 4, y + 13);
     doc.text(comparison.currentRun.auditLabel, MARGIN + CONTENT_W / 2 + 7, y + 13);
     setFont(7, 'normal', [100, 116, 139]);
-    doc.text(formatDate(comparison.baselineRun.generatedAt), MARGIN + 4, y + 19);
-    doc.text(formatDate(comparison.currentRun.generatedAt), MARGIN + CONTENT_W / 2 + 7, y + 19);
+    const runMetaLine = (pkg: ReportPackage) =>
+      [formatDate(pkg.auditRun.generatedAt), pkg.auditRun.deploymentTag ? `Deployment ${pkg.auditRun.deploymentTag}` : '', `${pkg.pages.length} page(s)`]
+        .filter(Boolean).join('  |  ');
+    doc.text(runMetaLine(baseline), MARGIN + 4, y + 19);
+    doc.text(runMetaLine(current), MARGIN + CONTENT_W / 2 + 7, y + 19);
     y += 30;
+
+    // ── Summary (plain English) ─────────────────────────────────────────────
+    if (insights) {
+      setFont(10, 'bold', [15, 23, 42]);
+      doc.text('Summary', MARGIN, y);
+      y += 5;
+      setFont(8.5, 'normal', [30, 41, 59]);
+      // jsPDF's built-in fonts have no arrow glyph: use "->" in the PDF text
+      const lines = doc.splitTextToSize(insights.summary.replace(/→/g, '->').replace(/−/g, '-'), CONTENT_W);
+      doc.text(lines, MARGIN, y);
+      y += lines.length * 4 + 3;
+
+      const verdict = (v: string) => (v === 'passed' ? 'Passed' : v === 'failed' ? 'Failed' : 'No data');
+      autoTable(doc, {
+        startY: y,
+        margin: { left: MARGIN, right: MARGIN },
+        head: [['Google Core Web Vitals', 'Baseline', 'Current']],
+        body: (['mobile', 'desktop'] as const).map(dev => [dev.charAt(0).toUpperCase() + dev.slice(1), verdict(insights.cwv[dev].baseline), verdict(insights.cwv[dev].current)]),
+        headStyles: { fillColor: [15, 23, 42], fontSize: 8, fontStyle: 'bold' },
+        bodyStyles: { fontSize: 8, cellPadding: 2.5 },
+        didParseCell: (data) => {
+          if (data.section !== 'body' || data.column.index === 0) return;
+          const v = String(data.cell.raw);
+          if (v === 'Passed') data.cell.styles.textColor = [21, 128, 61];
+          if (v === 'Failed') data.cell.styles.textColor = [185, 28, 28];
+        },
+      });
+      y = (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 5;
+
+      if (insights.statusChanges.length > 0) {
+        autoTable(doc, {
+          startY: y,
+          margin: { left: MARGIN, right: MARGIN },
+          head: [['Crossed a Google threshold', 'Device', 'Before', 'After']],
+          body: insights.statusChanges.map(s => [
+            `${s.better ? 'Better' : 'Worse'}: ${s.metricName} - ${s.pageKey}`, s.device,
+            `${STATUS_LABEL[s.baselineStatus!]} (${formatMetricValue(s.baselineValue, s.metricName)})`,
+            `${STATUS_LABEL[s.currentStatus!]} (${formatMetricValue(s.currentValue, s.metricName)})`,
+          ]),
+          headStyles: { fillColor: [15, 23, 42], fontSize: 8, fontStyle: 'bold' },
+          bodyStyles: { fontSize: 8, cellPadding: 2.5 },
+          didParseCell: (data) => {
+            if (data.section !== 'body' || data.column.index !== 3) return;
+            const better = insights.statusChanges[data.row.index]?.better;
+            data.cell.styles.textColor = better ? [21, 128, 61] : [185, 28, 28];
+          },
+        });
+        y = (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 5;
+      }
+
+      setFont(7, 'normal', [100, 116, 139]);
+      const note = doc.splitTextToSize(
+        "Real-user values are Google's 28-day average and change slowly; lab values change right after a deploy. " +
+        'Changes under 10% (or a minimum amount) are reported as Unchanged.', CONTENT_W);
+      doc.text(note, MARGIN, y);
+      y += note.length * 3.2 + 6;
+    }
 
     // ── Per-device sections (Mobile then Desktop) ──────────────────────────────
     const devices: Device[] = ['mobile', 'desktop'];
@@ -249,7 +316,8 @@ export default function ComparePage() {
       const devCurrentHealth = calculateOverallHealth(current.metrics.filter(m => m.device === device));
       const devHealthDelta = devCurrentHealth - devBaselineHealth;
 
-      // Device section header
+      // Device section header (start a new page if the header would be orphaned)
+      if (y > 240) { doc.addPage(); y = 20; }
       filledRect(MARGIN, y, CONTENT_W, 10, 30, 41, 59);
       setFont(9, 'bold', [255, 255, 255]);
       doc.text(`${device.toUpperCase()} RESULTS`, MARGIN + 4, y + 7);
@@ -286,14 +354,16 @@ export default function ComparePage() {
         autoTable(doc, {
           startY: y,
           margin: { left: MARGIN, right: MARGIN },
-          head: [['Page', 'Metric', 'Baseline', 'Current', 'Delta', 'Trend']],
+          head: [['Page', 'Metric', 'Baseline', 'Current', 'Delta', 'Trend', 'Source']],
           body: devDeltas.map(r => [
-            r.pageKey,
+            r.pageUrl ? `${r.pageKey}\n${r.pageUrl}` : r.pageKey,
             r.metricName,
-            formatMetricValue(r.baselineValue, r.metricName),
-            formatMetricValue(r.currentValue, r.metricName),
-            `${r.deltaDirection === 'improved' ? '−' : r.deltaDirection === 'regressed' ? '+' : '±'}${formatMetricValue(r.deltaValue, r.metricName)}`,
-            r.deltaDirection.charAt(0).toUpperCase() + r.deltaDirection.slice(1)
+            `${formatMetricValue(r.baselineValue, r.metricName)}${r.baselineStatus ? `\n${STATUS_LABEL[r.baselineStatus]}` : ''}`,
+            `${formatMetricValue(r.currentValue, r.metricName)}${r.currentStatus ? `\n${STATUS_LABEL[r.currentStatus]}` : ''}`,
+            `${r.deltaDirection === 'improved' ? '-' : r.deltaDirection === 'regressed' ? '+' : '±'}${formatMetricValue(r.deltaValue, r.metricName)}` +
+              (r.percentChange != null && r.percentChange !== 0 ? `\n(${r.percentChange > 0 ? '+' : ''}${r.percentChange}%)` : ''),
+            r.deltaDirection.charAt(0).toUpperCase() + r.deltaDirection.slice(1),
+            r.currentSource === 'lab' ? 'Lab' : r.currentSource === 'field-origin' ? 'Real users (site)' : r.currentSource ? 'Real users' : '',
           ]),
           headStyles: { fillColor: [15, 23, 42], fontSize: 8, fontStyle: 'bold', halign: 'center', valign: 'middle' },
           bodyStyles: { fontSize: 8, cellPadding: 3, valign: 'middle', lineWidth: 0.2, lineColor: [226, 232, 240] },
@@ -303,7 +373,8 @@ export default function ComparePage() {
             2: { halign: 'center' },
             3: { halign: 'center' },
             4: { halign: 'center' },
-            5: { halign: 'center' }
+            5: { halign: 'center' },
+            6: { halign: 'center', fontSize: 7 }
           },
           tableLineWidth: 0.2,
           tableLineColor: [226, 232, 240],
@@ -430,6 +501,7 @@ export default function ComparePage() {
                 <span>{comparison.baselineRun.projectName}</span>
                 <span className="status-badge text-muted-foreground" style={{ background: 'var(--background)', padding: '1px 6px', fontSize: '10px' }}>{comparison.baselineRun.environment}</span>
               </div>
+              <RunMeta pkg={baseline} />
             </div>
           </div>
           <div className="bg-card rounded-2xl p-5 relative overflow-hidden" style={{ border: '1px solid color-mix(in srgb, var(--blue-text) 20%, var(--border))' }}>
@@ -442,6 +514,7 @@ export default function ComparePage() {
                 <span>{comparison.currentRun.projectName}</span>
                 <span className="status-badge" style={{ background: 'var(--blue-bg)', color: 'var(--blue-text)', padding: '1px 6px', fontSize: '10px' }}>{comparison.currentRun.environment}</span>
               </div>
+              <RunMeta pkg={current} />
             </div>
           </div>
         </div>
@@ -490,6 +563,8 @@ export default function ComparePage() {
             </div>
           </div>
         </div>
+
+        {insights && <ComparisonSummary insights={insights} />}
 
         {/* Category score summary */}
         {summary.categoryScoresCompared > 0 && (
@@ -716,7 +791,10 @@ function ComparisonTable({ deltas }: { deltas: ComparisonDelta[] }) {
               "border-b border-border last:border-0 hover:bg-secondary/40 transition-colors",
               index % 2 === 0 ? "" : "bg-secondary/20"
             )}>
-              <TableCell className="font-semibold text-foreground pl-6 text-sm">{delta.pageKey}</TableCell>
+              <TableCell className="font-semibold text-foreground pl-6 text-sm">
+                {delta.pageKey}
+                {delta.pageUrl && <div className="font-mono text-[10px] font-normal text-muted-foreground truncate max-w-[220px]" title={delta.pageUrl}>{delta.pageUrl}</div>}
+              </TableCell>
               <TableCell>
                 <span className="font-mono text-xs font-bold px-2 py-1 rounded bg-secondary border border-border text-foreground">
                   {delta.metricName}
@@ -724,10 +802,13 @@ function ComparisonTable({ deltas }: { deltas: ComparisonDelta[] }) {
               </TableCell>
               <TableCell className="text-center font-mono text-sm text-muted-foreground tabular-nums">
                 {formatMetricValue(delta.baselineValue, delta.metricName)}
+                <StatusPill status={delta.baselineStatus} />
               </TableCell>
               <TableCell className="text-center text-muted-foreground/40">→</TableCell>
               <TableCell className="text-center font-mono text-sm font-bold text-foreground tabular-nums">
                 {formatMetricValue(delta.currentValue, delta.metricName)}
+                <StatusPill status={delta.currentStatus} />
+                {delta.currentSource && <div className="text-[9px] font-sans font-normal text-muted-foreground">{SOURCE_LABEL[delta.currentSource]}</div>}
               </TableCell>
               <TableCell className={cn(
                 "text-right font-mono text-sm font-bold tabular-nums",
@@ -736,6 +817,9 @@ function ComparisonTable({ deltas }: { deltas: ComparisonDelta[] }) {
               )}>
                 {delta.deltaDirection === 'improved' ? '−' : delta.deltaDirection === 'regressed' ? '+' : '±'}
                 {formatMetricValue(delta.deltaValue, delta.metricName)}
+                {delta.percentChange != null && delta.percentChange !== 0 && (
+                  <div className="text-[10px] font-normal">({delta.percentChange > 0 ? '+' : ''}{delta.percentChange}%)</div>
+                )}
               </TableCell>
               <TableCell className="text-right pr-6">
                 <Badge
@@ -838,6 +922,25 @@ function CategoryComparisonTable({ deltas }: { deltas: CategoryScoreDelta[] }) {
           ))}
         </TableBody>
       </Table>
+    </div>
+  );
+}
+
+/** Small Good / Needs improvement / Poor pill under a value. */
+function StatusPill({ status }: { status?: string }) {
+  if (!status) return null;
+  const style = status === 'good' ? { color: 'var(--green-text)' } : status === 'poor' ? { color: 'var(--red-text)' } : { color: 'var(--amber-text)' };
+  return <div className="text-[9px] font-sans font-semibold uppercase tracking-wider" style={style}>{STATUS_LABEL[status] ?? status}</div>;
+}
+
+/** Deployment tag, page count and run id under each run card. */
+function RunMeta({ pkg }: { pkg: ReportPackage }) {
+  const r = pkg.auditRun;
+  return (
+    <div className="flex flex-wrap gap-x-4 gap-y-1 mt-2 text-[11px] text-muted-foreground">
+      {r.deploymentTag && <span>Deployment: <strong className="text-foreground">{r.deploymentTag}</strong></span>}
+      <span>{pkg.pages.length} page{pkg.pages.length === 1 ? '' : 's'}</span>
+      <span className="font-mono" title={r.runId}>Run {r.runId.substring(0, 8)}</span>
     </div>
   );
 }

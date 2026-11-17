@@ -176,7 +176,19 @@ export interface ComparisonDelta {
   currentValue: number;
   deltaValue: number;
   deltaDirection: 'improved' | 'regressed' | 'unchanged';
+  /** URL of the page in the current run (labels can repeat). */
+  pageUrl?: string;
+  /** Good / Needs improvement / Poor in each run (threshold crossings matter most). */
+  baselineStatus?: Status;
+  currentStatus?: Status;
+  /** Where each value came from: real users (URL or whole site) or a lab test. */
+  baselineSource?: MetricSource;
+  currentSource?: MetricSource;
+  /** Signed % change vs baseline (negative = faster/better for CWV). */
+  percentChange?: number | null;
 }
+
+export type MetricSource = 'field-url' | 'field-origin' | 'lab';
 
 // Category score delta for comparison
 export interface CategoryScoreDelta {
