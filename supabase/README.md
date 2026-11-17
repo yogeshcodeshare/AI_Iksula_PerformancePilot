@@ -38,6 +38,7 @@ order by failures desc;
 | `20261116000002_audit_failures_hardening.sql` | A | Advisor fixes |
 | `20261116000003_auth_iksula_only.sql` | B | Only @iksula.com accounts |
 | `20261116000004_audit_runs.sql` | C | Saved runs for team history and compare-from-list |
+| `20261117000005_phase_d_hardening.sql` | D | Guest grant tightened, global guest log cap, delete needs Iksula account, `ping()` for keep-alive |
 
 Apply new migrations in the **SQL Editor** (paste the file, Run). Supabase asks a person to confirm database changes.
 

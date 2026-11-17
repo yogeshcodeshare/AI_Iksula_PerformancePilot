@@ -11,7 +11,10 @@
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "test:e2e": "playwright test",
-    "serve:dist": "serve dist -l 3000 --no-port-switching"
+    "serve:dist": "serve dist -l 3000 --no-port-switching",
+    "build:team-e2e": "node scripts/build-team-e2e.mjs",
+    "serve:dist-team": "serve dist-team -l 3001 --no-port-switching",
+    "test:e2e:team": "playwright test -c playwright.team.config.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.118.0",
