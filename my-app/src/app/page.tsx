@@ -133,7 +133,7 @@ export default function Dashboard() {
           <div className="double-bezel">
             <div className="double-bezel-inner">
               <div className="flex items-center justify-between mb-4">
-                <span className="text-muted-foreground text-[12px] font-semibold uppercase tracking-[0.1em]">Avg Health Score</span>
+                <span className="text-muted-foreground text-[12px] font-semibold uppercase tracking-[0.1em]">Avg Overall Health (mobile + desktop)</span>
                 <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ background: 'var(--green-bg)' }}>
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--green-text)" strokeWidth={1.5}><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
                 </div>
@@ -260,7 +260,7 @@ export default function Dashboard() {
                   <tr className="border-b border-border">
                     <th className="text-left px-5 py-3 text-muted-foreground text-[12px] font-semibold uppercase tracking-[0.1em]">Project</th>
                     <th className="text-left px-5 py-3 text-muted-foreground text-[12px] font-semibold uppercase tracking-[0.1em]">Label</th>
-                    <th className="text-left px-5 py-3 text-muted-foreground text-[12px] font-semibold uppercase tracking-[0.1em]">Health</th>
+                    <th className="text-left px-5 py-3 text-muted-foreground text-[12px] font-semibold uppercase tracking-[0.1em]">Overall health</th>
                     <th className="text-left px-5 py-3 text-muted-foreground text-[12px] font-semibold uppercase tracking-[0.1em]">Pages</th>
                     <th className="text-left px-5 py-3 text-muted-foreground text-[12px] font-semibold uppercase tracking-[0.1em]">Date</th>
                     <th className="text-right px-5 py-3 text-muted-foreground text-[12px] font-semibold uppercase tracking-[0.1em]">Actions</th>

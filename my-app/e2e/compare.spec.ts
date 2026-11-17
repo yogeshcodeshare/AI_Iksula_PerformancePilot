@@ -37,7 +37,10 @@ test('Compare matches the same page typed differently and shows deltas', async (
   await expect(page.getByText('Baseline without slash')).toBeVisible();
   await expect(page.getByText(/Pages in baseline not in current/)).toHaveCount(0);
   // Before the Day 3 fix this showed "0 metrics compared"
-  await expect(page.getByText(/5 metrics compared/)).toBeVisible();
+  // 5 Core Web Vitals + 2 lab-only metrics (TBT, Speed Index)
+  await expect(page.getByText(/7 metrics compared/)).toBeVisible();
+  await expect(page.getByTestId('before-after-chart')).toBeVisible();
+  await expect(page.getByTestId('before-after-chart').getByText('TBT')).toBeVisible();
   await expect(page.getByRole('tab', { name: /Improvements \(1\)/ })).toBeVisible();
 });
 

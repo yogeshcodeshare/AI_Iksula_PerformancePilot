@@ -120,7 +120,7 @@ export function SavedRuns() {
             <thead>
               <tr className="border-b border-border">
                 <th className="px-4 py-3 w-10"><span className="sr-only">Select</span></th>
-                {['Project', 'Label', 'Health', 'Pages', 'Run by', 'Date', ''].map(h => (
+                {['Project', 'Label', 'Overall health', 'Pages', 'Run by', 'Date', ''].map(h => (
                   <th key={h} className="text-left px-4 py-3 text-muted-foreground text-[12px] font-semibold uppercase tracking-[0.1em]">{h}</th>
                 ))}
               </tr>

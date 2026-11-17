@@ -29,6 +29,9 @@ export type PageType =
 
 export type Device = 'mobile' | 'desktop';
 export type MetricName = 'LCP' | 'INP' | 'CLS' | 'FCP' | 'TTFB' | 'performance_score';
+/** Lab-only Lighthouse metrics shown in comparisons (no real-user data exists for them). */
+export type LabMetricName = 'TBT' | 'SI';
+export type ComparedMetricName = MetricName | LabMetricName;
 export type Status = 'good' | 'needs-improvement' | 'poor';
 export type Source = 'pagespeed' | 'lighthouse';
 
@@ -170,7 +173,7 @@ export interface ComparisonDelta {
   baselineRunId: string;
   currentRunId: string;
   pageKey: string;
-  metricName: MetricName;
+  metricName: ComparedMetricName;
   device: Device;
   baselineValue: number;
   currentValue: number;

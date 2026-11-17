@@ -39,10 +39,21 @@ export interface ListOptions {
 }
 
 /** Keep failing/warning diagnostics only, capped per page+device, without long details. */
+const LAB_METRIC_KEYS = new Set([
+  'largest-contentful-paint', 'first-contentful-paint', 'total-blocking-time',
+  'cumulative-layout-shift', 'speed-index',
+]);
+
 export function trimDiagnostics(diagnostics: DiagnosticItem[]): DiagnosticItem[] {
   const counts = new Map<string, number>();
   const out: DiagnosticItem[] = [];
   for (const d of diagnostics) {
+    // Lab metric audits are always kept (needed for TBT / Speed Index comparison)
+    if (LAB_METRIC_KEYS.has(d.auditKey)) {
+      const { details: _d, ...keep } = d;
+      out.push(keep as DiagnosticItem);
+      continue;
+    }
     if (d.status !== 'fail' && d.status !== 'warning') continue;
     const key = `${d.pageId}:${d.device}`;
     const n = counts.get(key) ?? 0;
