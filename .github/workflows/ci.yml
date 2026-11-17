@@ -51,6 +51,20 @@ jobs:
       - name: E2E tests (PageSpeed API mocked)
         run: npm run test:e2e
 
+      - name: Team build (Supabase pointed at a fake host)
+        run: npm run build:team-e2e
+
+      - name: Team E2E tests (login, saved runs, compare, error logging; Supabase mocked)
+        run: npm run test:e2e:team
+
+      - name: Upload team Playwright report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report-team
+          path: my-app/playwright-report-team
+          retention-days: 14
+
       - name: Upload Playwright report
         if: always()
         uses: actions/upload-artifact@v4

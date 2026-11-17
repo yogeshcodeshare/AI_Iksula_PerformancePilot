@@ -3,6 +3,8 @@ import { defineConfig, devices } from '@playwright/test';
 // E2E specs are written on plan Day 5 (Thu 19 Nov). This config is the Day 1 foundation.
 export default defineConfig({
   testDir: './e2e',
+  // Team-mode specs need the dist-team build: see playwright.team.config.ts
+  testIgnore: '**/team/**',
   timeout: 60_000,
   retries: process.env.CI ? 1 : 0,
   reporter: [['html', { open: 'never' }], ['list']],

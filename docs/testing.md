@@ -7,6 +7,7 @@ PerformancePilot has three test layers. All run offline: the Google PageSpeed AP
 | Unit | Vitest | `my-app/src/**/*.test.ts` | CWV thresholds and formatting, PSI metric/category/diagnostic extraction, error classification, retry and second-pass policy, comparison and URL matching, storage (fake IndexedDB), issue-report URL |
 | Component | Vitest + React Testing Library | `my-app/src/**/*.test.tsx` | Compare upload dialog (save-before-callback, error messages), New Audit form (Bulk Add labels, duplicate URLs, required fields) |
 | End-to-end | Playwright (+ axe-core) | `my-app/e2e/*.spec.ts` | Full journeys in Chromium against the real app, with PSI mocked via `page.route` |
+| End-to-end (team) | Playwright | `my-app/e2e/team/*.spec.ts` | Login, auto-saved runs, My/Team audits, compare from the list, delete-own-only, guest + QA error logging, Failures page. Uses the `dist-team` build with Supabase pointed at a fake host, fully mocked in `e2e/team/supabaseMock.ts` |
 
 ## Commands (from `my-app/`)
 
@@ -14,6 +15,7 @@ PerformancePilot has three test layers. All run offline: the Google PageSpeed AP
 npm test                 # unit + component
 npm run test:coverage    # with coverage (coverage/index.html)
 npm run build && npm run test:e2e   # E2E runs against the production build (dist/), served on :3000
+npm run build:team-e2e && npm run test:e2e:team   # team features, Supabase mocked (dist-team/, :3001)
 npx playwright show-report
 E2E_BASE_URL=https://sitevitals-ai.vercel.app npx playwright test e2e/smoke.spec.ts   # smoke a deployment
 ```
@@ -41,4 +43,4 @@ A bug is first captured as `it.fails(...)` (the suite stays green while the bug 
 ## CI
 
 `.github/workflows/ci.yml` runs on every push to `main` and every pull request:
-type check → lint (report only, pre-existing issues) → unit tests with coverage → production build → E2E. Playwright and coverage reports are uploaded as build artifacts.
+type check → lint (report only, pre-existing issues) → unit tests with coverage → production build → E2E → team build → team E2E. Playwright and coverage reports are uploaded as build artifacts.
