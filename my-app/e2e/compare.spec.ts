@@ -55,3 +55,21 @@ test('Compare rejects a file that is not a report', async ({ page }) => {
   });
   await expect(page.getByRole('alert')).toContainText('not a PerformancePilot report');
 });
+
+test('Guest compares two audits from this browser without uploading a file', async ({ page }) => {
+  let lcp = 2000;
+  await mockPageSpeed(page, url => ok(url, { LCP: lcp, INP: 150, CLS: 2, FCP: 1500, TTFB: 600 }));
+  await startAudit(page, ['https://twice.test/'], 'Guest Shop', 'Before');
+  await waitForCompletion(page);
+  lcp = 3600;
+  await startAudit(page, ['https://twice.test/'], 'Guest Shop', 'After');
+  await waitForCompletion(page);
+
+  await page.goto('/');
+  await page.getByRole('checkbox', { name: 'Select Guest Shop After (this browser)' }).check();
+  await page.getByRole('checkbox', { name: 'Select Guest Shop Before (this browser)' }).check();
+  await page.getByRole('button', { name: /Compare selected \(2\/2\)/ }).click();
+  await expect(page).toHaveURL(/\/compare\/\?baseline=.+&current=/);
+  await expect(page.getByText(/metrics compared/)).toBeVisible();
+  await expect(page.getByRole('tab', { name: /Regressions \([1-9]/ }).first()).toBeVisible(); // LCP got slower
+});

@@ -1,7 +1,8 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { trimDiagnostics, toRunRow, reportToState, saveRun, listRuns, deleteRun, MAX_DIAGNOSTICS_PER_PAGE_DEVICE } from './runStore';
-import { orderForCompare } from '@/components/dashboard/SavedRuns';
+import { runPick } from '@/components/dashboard/SavedRuns';
+import { orderPicks, togglePick, compareUrl } from '@/lib/compareSelection';
 import { __setSupabaseForTests } from '@/lib/supabase';
 import { makeReport } from '../../test/fixtures/reports';
 import type { AuditState, DiagnosticItem } from '@/types';
@@ -134,10 +135,21 @@ describe('listRuns / deleteRun', () => {
   });
 });
 
-describe('orderForCompare', () => {
+describe('compare selection (saved + this browser)', () => {
+  const a = { id: 'a', at: '2026-01-01T00:00:00Z', label: 'A' };
+  const b = { id: 'b', at: '2026-02-01T00:00:00Z', label: 'B' };
+  const c = { id: 'c', at: '2026-03-01T00:00:00Z', label: 'C' };
   it('uses the older run as the baseline regardless of selection order', () => {
-    const older = { id: 'a', created_at: '2026-01-01T00:00:00Z' } as never;
-    const newer = { id: 'b', created_at: '2026-02-01T00:00:00Z' } as never;
-    expect(orderForCompare(newer, older)).toEqual({ baseline: older, current: newer });
+    expect(orderPicks(b, a)).toEqual({ baseline: a, current: b });
+    expect(compareUrl([b, a])).toBe('/compare/?baseline=a&current=b');
+  });
+  it('keeps at most two picks and toggles off a picked run', () => {
+    expect(togglePick(togglePick(togglePick([], a), b), c).map(p => p.id)).toEqual(['b', 'c']);
+    expect(togglePick([a, b], a).map(p => p.id)).toEqual(['b']);
+    expect(compareUrl([a])).toBeNull();
+  });
+  it('a saved run is ordered by when the audit ran, not when it was saved', () => {
+    const p = runPick({ id: 'x', created_at: '2026-05-01T00:00:00Z', run_generated_at: '2026-01-15T00:00:00Z', project_name: 'P', audit_label: 'L' } as never);
+    expect(p.at).toBe('2026-01-15T00:00:00Z');
   });
 });

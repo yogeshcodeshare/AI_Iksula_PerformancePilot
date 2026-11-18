@@ -9,6 +9,7 @@ import { useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/auth';
 import { SavedRuns } from '@/components/dashboard/SavedRuns';
 import { saveRun } from '@/services/runStore';
+import { togglePick, compareUrl, type ComparePick } from '@/lib/compareSelection';
 
 export default function Dashboard() {
   const [recentAudits, setRecentAudits] = useState<RecentAudit[]>([]);
@@ -17,6 +18,11 @@ export default function Dashboard() {
   const router = useRouter();
   const { isTeamMember } = useAuth();
   const [savedToAccount, setSavedToAccount] = useState<Record<string, 'saving' | 'saved' | 'failed'>>({});
+  // One selection across "Saved audits" and "This browser": compare any two runs.
+  const [picked, setPicked] = useState<ComparePick[]>([]);
+  const onToggle = (p: ComparePick) => setPicked(list => togglePick(list, p));
+  const onCompare = () => { const url = compareUrl(picked); if (url) router.push(url); };
+  const localPick = (a: RecentAudit): ComparePick => ({ id: a.runId, at: a.generatedAt || '', label: `${a.projectName} ${a.auditLabel}` });
 
   const handleSaveToAccount = async (runId: string) => {
     setSavedToAccount(s => ({ ...s, [runId]: 'saving' }));
@@ -211,7 +217,7 @@ export default function Dashboard() {
         </div>
 
         {/* Saved audits (logged-in Iksula QA) */}
-        <SavedRuns />
+        <SavedRuns picked={picked} onToggle={onToggle} onCompare={onCompare} />
 
         {/* Recent Audits (this browser) */}
         <div>
@@ -242,6 +248,12 @@ export default function Dashboard() {
                   Clear All
                 </button>
               )}
+              {recentAudits.length > 1 && (
+                <button type="button" disabled={picked.length !== 2} onClick={onCompare}
+                  className="text-sm font-semibold px-4 py-2 rounded-lg border-none cursor-pointer bg-primary text-primary-foreground disabled:opacity-40 disabled:cursor-not-allowed">
+                  Compare selected ({picked.length}/2)
+                </button>
+              )}
             </div>
           </div>
 
@@ -258,6 +270,7 @@ export default function Dashboard() {
               <table className="w-full border-collapse text-sm">
                 <thead>
                   <tr className="border-b border-border">
+                    <th className="px-4 py-3 w-10"><span className="sr-only">Select</span></th>
                     <th className="text-left px-5 py-3 text-muted-foreground text-[12px] font-semibold uppercase tracking-[0.1em]">Project</th>
                     <th className="text-left px-5 py-3 text-muted-foreground text-[12px] font-semibold uppercase tracking-[0.1em]">Label</th>
                     <th className="text-left px-5 py-3 text-muted-foreground text-[12px] font-semibold uppercase tracking-[0.1em]">Overall health</th>
@@ -277,6 +290,10 @@ export default function Dashboard() {
                         className="table-row-hover cursor-pointer border-b border-border/50 last:border-0"
                         onClick={() => handleViewResults(audit.runId)}
                       >
+                        <td className="px-4 py-4" onClick={e => e.stopPropagation()}>
+                          <input type="checkbox" aria-label={`Select ${audit.projectName || 'audit'} ${audit.auditLabel || ''} (this browser)`}
+                            checked={picked.some(p => p.id === audit.runId)} onChange={() => onToggle(localPick(audit))} />
+                        </td>
                         <td className="px-5 py-4 font-medium text-foreground">{audit.projectName || 'Unnamed Audit'}</td>
                         <td className="px-5 py-4 text-foreground/80">{audit.auditLabel || '—'}</td>
                         <td className="px-5 py-4">
@@ -311,7 +328,7 @@ export default function Dashboard() {
                   })}
                   {filteredAudits.length === 0 && searchQuery && (
                     <tr>
-                      <td colSpan={6} className="px-5 py-8 text-center text-muted-foreground">
+                      <td colSpan={7} className="px-5 py-8 text-center text-muted-foreground">
                         No audits matching &ldquo;{searchQuery}&rdquo;
                       </td>
                     </tr>

@@ -5,19 +5,25 @@ import { useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/auth';
 import { formatDate } from '@/lib/utils';
 import { listRuns, listProjects, deleteRun, type RunScope, type RunSummary } from '@/services/runStore';
+import { type ComparePick } from '@/lib/compareSelection';
 
 const healthColors = (h: number) => ({
   bg: h >= 80 ? 'var(--green-bg)' : h >= 50 ? 'var(--amber-bg)' : 'var(--red-bg)',
   text: h >= 80 ? 'var(--green-text)' : h >= 50 ? 'var(--amber-text)' : 'var(--red-text)',
 });
 
-/** Pick baseline (older) and current (newer) from two selected runs. */
-export function orderForCompare(a: RunSummary, b: RunSummary): { baseline: RunSummary; current: RunSummary } {
-  return new Date(a.created_at) <= new Date(b.created_at) ? { baseline: a, current: b } : { baseline: b, current: a };
+
+export const runPick = (r: RunSummary): ComparePick => ({ id: r.id, at: r.run_generated_at || r.created_at, label: `${r.project_name} ${r.audit_label}` });
+
+interface Props {
+  /** shared with the "This browser" list on the dashboard */
+  picked: ComparePick[];
+  onToggle: (p: ComparePick) => void;
+  onCompare: () => void;
 }
 
 /** Team history for logged-in Iksula QA (Phase C). Renders nothing for guests. */
-export function SavedRuns() {
+export function SavedRuns({ picked, onToggle, onCompare }: Props) {
   const { isTeamMember, email } = useAuth();
   const router = useRouter();
   const [scope, setScope] = useState<RunScope>('mine');
@@ -29,7 +35,6 @@ export function SavedRuns() {
   const [page, setPage] = useState(0);
   const [hasMore, setHasMore] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [selected, setSelected] = useState<string[]>([]);
 
   const load = useCallback(async (nextPage: number, append: boolean) => {
     setLoading(true);
@@ -52,21 +57,12 @@ export function SavedRuns() {
 
   if (!isTeamMember) return null;
 
-  const toggle = (id: string) =>
-    setSelected(s => (s.includes(id) ? s.filter(x => x !== id) : s.length >= 2 ? [s[1], id] : [...s, id]));
-
-  const compare = () => {
-    const [a, b] = selected.map(id => rows.find(r => r.id === id)).filter(Boolean) as RunSummary[];
-    if (!a || !b) return;
-    const { baseline, current } = orderForCompare(a, b);
-    router.push(`/compare/?baseline=${encodeURIComponent(baseline.id)}&current=${encodeURIComponent(current.id)}`);
-  };
 
   const remove = async (r: RunSummary) => {
     if (!confirm(`Delete "${r.project_name} – ${r.audit_label || 'run'}" from the team history? This cannot be undone.`)) return;
     if (await deleteRun(r.id)) {
       setRows(rs => rs.filter(x => x.id !== r.id));
-      setSelected(s => s.filter(x => x !== r.id));
+      if (picked.some(p => p.id === r.id)) onToggle(runPick(r));
     } else {
       alert('Could not delete this run.');
     }
@@ -74,7 +70,7 @@ export function SavedRuns() {
 
   const tab = (value: RunScope, label: string) => (
     <button type="button" role="tab" aria-selected={scope === value}
-      onClick={() => { setScope(value); setSelected([]); }}
+      onClick={() => setScope(value)}
       className={`px-3 py-1.5 text-sm rounded-lg border-none cursor-pointer ${scope === value ? 'bg-foreground text-background font-semibold' : 'bg-transparent text-muted-foreground hover:text-foreground'}`}>
       {label}
     </button>
@@ -101,9 +97,9 @@ export function SavedRuns() {
           </select>
           <input aria-label="From date" type="date" value={from} onChange={e => setFrom(e.target.value)}
             className="py-2 px-2 text-sm bg-card border border-border rounded-lg text-foreground" />
-          <button type="button" disabled={selected.length !== 2} onClick={compare}
+          <button type="button" disabled={picked.length !== 2} onClick={onCompare}
             className="text-sm font-semibold px-4 py-2 rounded-lg border-none cursor-pointer bg-primary text-primary-foreground disabled:opacity-40 disabled:cursor-not-allowed">
-            Compare selected ({selected.length}/2)
+            Compare selected ({picked.length}/2)
           </button>
         </div>
       </div>
@@ -134,7 +130,7 @@ export function SavedRuns() {
                   <tr key={r.id} className="table-row-hover border-b border-border/50 last:border-0">
                     <td className="px-4 py-3">
                       <input type="checkbox" aria-label={`Select ${r.project_name} ${r.audit_label}`}
-                        checked={selected.includes(r.id)} onChange={() => toggle(r.id)} />
+                        checked={picked.some(p => p.id === r.id)} onChange={() => onToggle(runPick(r))} />
                     </td>
                     <td className="px-4 py-3 font-medium text-foreground">
                       <button type="button" className="bg-transparent border-none p-0 text-left text-foreground underline-offset-2 hover:underline cursor-pointer"
@@ -168,7 +164,7 @@ export function SavedRuns() {
           </div>
         )}
       </div>
-      <p className="text-xs text-muted-foreground mt-2">Tick any two audits and press Compare. The older one is used as the baseline.</p>
+      <p className="text-xs text-muted-foreground mt-2">Tick any two audits, from this list or from This browser below, and press Compare selected. The older one is used as the baseline.</p>
     </section>
   );
 }

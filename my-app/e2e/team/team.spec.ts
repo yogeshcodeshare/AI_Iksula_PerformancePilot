@@ -79,9 +79,9 @@ test('QA: finished audits are saved, listed, compared from the list, and only ow
   await expect(page.getByRole('button', { name: 'Delete Shop Their run' })).toHaveCount(0); // not mine
 
   // Compare the two saved runs straight from the list
-  await page.getByRole('checkbox', { name: 'Select Shop Release 1' }).check();
-  await page.getByRole('checkbox', { name: 'Select Shop Release 2' }).check();
-  await page.getByRole('button', { name: /Compare selected \(2\/2\)/ }).click();
+  await page.getByRole('checkbox', { name: 'Select Shop Release 1', exact: true }).check();
+  await page.getByRole('checkbox', { name: 'Select Shop Release 2', exact: true }).check();
+  await page.getByRole('button', { name: /Compare selected \(2\/2\)/ }).first().click();
   await expect(page).toHaveURL(/\/compare\/\?baseline=.+&current=/);
   await expect(page.getByText(/metrics compared/)).toBeVisible();
   await expect(page.getByTestId('before-after-chart')).toBeVisible();
@@ -99,4 +99,26 @@ test('QA: Failures page shows logged failures with who hit them', async ({ page 
   await expect(page.getByText('https://slow.test/').first()).toBeVisible();
   await expect(page.getByText('https://down.test/').first()).toBeVisible();
   await expect(page.getByText(QA.email).first()).toBeVisible();
+});
+
+test('QA: compare a saved run with an audit that exists only in this browser', async ({ page }) => {
+  const db = await mockSupabase(page);
+  await mockPageSpeed(page, url => ok(url, { LCP: 2400, INP: 150, CLS: 2, FCP: 1500, TTFB: 600 }));
+  // Guest audit first: stays in this browser only
+  await startAudit(page, ['https://shop.test/'], 'Shop', 'Browser only');
+  await waitForCompletion(page);
+  // Then log in and run a saved audit
+  await loginAs(page, QA);
+  await startAudit(page, ['https://shop.test/'], 'Shop', 'Saved run');
+  await waitForCompletion(page);
+  await expect.poll(() => db.runs.length).toBe(1);
+
+  await page.goto('/');
+  await page.getByRole('checkbox', { name: 'Select Shop Saved run', exact: true }).check();
+  await page.getByRole('checkbox', { name: 'Select Shop Browser only (this browser)' }).check();
+  await expect(page.getByRole('button', { name: /Compare selected \(2\/2\)/ }).first()).toBeEnabled();
+  await page.getByRole('button', { name: /Compare selected \(2\/2\)/ }).first().click();
+  await expect(page).toHaveURL(/\/compare\/\?baseline=.+&current=/);
+  await expect(page.getByText('Browser only').first()).toBeVisible(); // baseline = older browser audit
+  await expect(page.getByText(/metrics compared/)).toBeVisible();
 });

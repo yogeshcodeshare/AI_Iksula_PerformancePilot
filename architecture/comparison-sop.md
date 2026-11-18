@@ -172,3 +172,8 @@ Only Core Web Vitals are compared in the Metrics tab: **LCP, INP, CLS, FCP, TTFB
 3. Missing pages list (in baseline but not current)
 4. New pages list (in current but not baseline)
 5. Highest impact regressions (top 5)
+
+## Compare any two runs from the dashboard (18 Nov 2026)
+- One selection is shared by **Saved audits** (account) and **This browser** (IndexedDB); guests see checkboxes on This browser only.
+- **Compare selected** opens `/compare/?baseline=<id>&current=<id>`; the older run (by the time the audit ran, `run_generated_at` / `generatedAt`) is the baseline.
+- The compare page loads each id from this browser first, then from the account. Guests can now compare two local audits without exporting JSON.

@@ -14,7 +14,7 @@ import {
   TableHeader,
   TableRow
 } from '@/components/ui/table';
-import { ReportPackage, ComparisonResult, ComparisonDelta, CategoryScoreDelta, CategoryName, Device } from '@/types';
+import { ReportPackage, ComparisonResult, ComparisonDelta, CategoryScoreDelta, CategoryName, Device, AuditState } from '@/types';
 import {
   compareReports,
   generateComparisonSummary,
@@ -52,6 +52,25 @@ import autoTable from 'jspdf-autotable';
 // jsPDF autoTable extends jsPDF with lastAutoTable at runtime — accessed via cast
 type AutoTableDoc = { lastAutoTable: { finalY: number } };
 
+function stateToPackage(s: AuditState): ReportPackage {
+  return {
+    metadata: {
+      schemaVersion: s.run!.schemaVersion,
+      appVersion: '1.0.0',
+      generatedAt: s.run!.generatedAt,
+      thresholdProfile: 'core-web-vitals-default',
+      sourcePolicy: 'pagespeed-first-lighthouse-fallback',
+    },
+    auditRun: s.run!,
+    pages: s.pages,
+    metrics: s.metrics,
+    categoryScores: s.categoryScores || [],
+    diagnostics: s.diagnostics || [],
+    cwvAssessments: s.cwvAssessments || [],
+    evidence: [],
+  };
+}
+
 export default function ComparePage() {
   const [baseline, setBaseline] = useState<ReportPackage | null>(null);
   const [current, setCurrent] = useState<ReportPackage | null>(null);
@@ -64,8 +83,11 @@ export default function ComparePage() {
     const baselineRunId = params.get('baseline');
 
     async function loadBaseline() {
-      // Phase C: "Compare selected" on the dashboard passes ?baseline=<saved run id>
+      // "Compare selected" on the dashboard passes ?baseline=<run id>: an audit
+      // in this browser (IndexedDB) or one saved to the account.
       if (baselineRunId) {
+        const local = await getAuditStateByRunId(baselineRunId);
+        if (local?.run) return setBaseline(stateToPackage(local));
         const saved = await getRunReport(baselineRunId);
         if (saved) return setBaseline(saved);
       }
@@ -90,25 +112,7 @@ export default function ComparePage() {
         }
       }
       if (!currentAudit) currentAudit = await getAuditStateAsync();
-      if (currentAudit?.run) {
-        const pkg: ReportPackage = {
-          metadata: {
-            schemaVersion: currentAudit.run.schemaVersion,
-            appVersion: '1.0.0',
-            generatedAt: currentAudit.run.generatedAt,
-            thresholdProfile: 'core-web-vitals-default',
-            sourcePolicy: 'pagespeed-first-lighthouse-fallback'
-          },
-          auditRun: currentAudit.run,
-          pages: currentAudit.pages,
-          metrics: currentAudit.metrics,
-          categoryScores: currentAudit.categoryScores || [],
-          diagnostics: currentAudit.diagnostics || [],
-          cwvAssessments: currentAudit.cwvAssessments || [],
-          evidence: []
-        };
-        setCurrent(pkg);
-      }
+      if (currentAudit?.run) setCurrent(stateToPackage(currentAudit));
     }
     loadCurrent();
   }, []);

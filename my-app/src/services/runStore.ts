@@ -15,6 +15,8 @@ export const PAGE_SIZE = 25;
 export interface RunSummary {
   id: string;
   created_at: string;
+  /** when the audit itself ran (can be earlier than created_at for 'Save to my account') */
+  run_generated_at?: string | null;
   created_by: string;
   created_by_email: string;
   project_name: string;
@@ -128,7 +130,7 @@ export async function saveRun(state: AuditState): Promise<boolean> {
 }
 
 const SUMMARY_COLUMNS =
-  'id, created_at, created_by, created_by_email, project_name, audit_label, environment, deployment_tag, page_count, failure_count, overall_health, page_urls';
+  'id, created_at, run_generated_at, created_by, created_by_email, project_name, audit_label, environment, deployment_tag, page_count, failure_count, overall_health, page_urls';
 
 /** List saved runs (newest first). Returns { rows, hasMore }. */
 export async function listRuns(opts: ListOptions): Promise<{ rows: RunSummary[]; hasMore: boolean }> {
